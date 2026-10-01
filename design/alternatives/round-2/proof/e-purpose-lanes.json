@@ -1,0 +1,25 @@
+{
+  "title": "Handy · E · Why each handoff exists",
+  "desktopOverflow": false,
+  "missingAnchors": [],
+  "imagesLoaded": true,
+  "selects": 0,
+  "headings": [
+    "Follow the owners",
+    "Why send two messages?",
+    "Stable parts, changing parts, and what exists"
+  ],
+  "caseCoverage": {
+    "cancel": true,
+    "focus": true,
+    "changedField": true,
+    "invalidReply": true,
+    "protected": true,
+    "proposed": true
+  },
+  "missingLocalLinks": [],
+  "mobileOverflow": false,
+  "externalRequests": [],
+  "javascript": "disabled; core reading inspected without scripts",
+  "checkedAt": "2026-09-27T08:46:14.606Z"
+}

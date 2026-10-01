@@ -1,0 +1,17 @@
+# H: connected architecture map
+
+H develops C's explicit handoffs into a map that can be read without knowing the source vocabulary. Startup, invocation, the concurrent context/audio work, request, reply checks, output and the next session appear in one connected account. Action boxes are explicitly described as diagram actions rather than invented app components. P1–P7 remain stable links between the map, UI evidence and closeups.
+
+The page keeps the original annotated native dictionary capture and places the original context capture beside the routing explanation. HTML annotations on the unchanged context image identify the executable rule and Save profile control. The real widget capture sits beside the metadata handoff it illustrates. Captures establish visible controls and icon placement; source excerpts establish runtime behavior. Their historical date, synthetic profile data and synthetic widget event are stated locally and in provenance.
+
+The request closeup explains instructions versus data before naming system and user roles. It explicitly avoids equating roles with change frequency. Compatibility checks, optional future provider prefix reuse and a continuing conversation are accounted for separately. The current architecture remains the page's main subject.
+
+Visible output checks connect each trigger to its consequence. The next-session section distinguishes saved profile data, process memory, temporary session data and history. F's G1-A/B/C meanings and pending answer are retained, with readback recommended. The small G1 situation picture exposes the missing completion check between successful dispatch and learning.
+
+The page needs no script, dropdown, hover or stepper to reveal its essential facts. Source disclosures are optional. At narrow widths, the concurrent branches remain under a shared “Independent work” label and border; the request handoff reflows vertically with its arrow. The mapping keeps its labels when it reflows.
+
+The portable proposal does not require this page skeleton, profile concepts, message roles, cache content or lane count. In an unrelated hypothetical warehouse returns explanation, the same method could show inspection and refund authorization running independently, their join before payment, and a photographed scanner screen linked to the receiving action. Whether a scanned return proves an issued refund would be shown at that boundary, with pending policy choices kept separate from current behavior.
+
+Verification passed using installed Edge through Playwright at 1440 × 1000 and 390 × 844, with JavaScript disabled. All three embedded images loaded; internal anchors resolved; neither viewport overflowed horizontally; no external requests occurred. Local links resolved except the parent-owned comparison index, which had not yet been generated at the check. `verification.json` records the checks. Desktop map, captured-app section, G1 and mobile map screenshots were visually inspected. The map was shortened to about 1020 pixels at desktop while keeping the node heading and body sizes; the hero now brings its start near 320 pixels.
+
+The builder embeds three inspected historical captures and twelve source excerpts with file hashes. Regenerate with `uv run design/alternatives/round-3/h-connected-map/build.py`; verify with `node design/alternatives/round-3/h-connected-map/verify.mjs`. Application behavior, live voice output, endpoint cache benefits and automatic learning were not tested by this design pass. Reader acceptance of H remains pending.

@@ -154,8 +154,18 @@ const settingUpdaters: {
   auto_submit_key: (value) =>
     commands.changeAutoSubmitKeySetting(value as string),
   history_limit: (value) => commands.updateHistoryLimit(value as number),
-  post_process_enabled: (value) =>
-    commands.changePostProcessEnabledSetting(value as boolean),
+  post_process_enabled: async (value) => {
+    const result = await commands.changePostProcessEnabledSetting(
+      value as boolean,
+    );
+    if (result.status === "error") throw new Error(result.error);
+  },
+  post_process_profiles: async (value) => {
+    const result = await commands.changePostProcessProfilesSetting(
+      value as boolean,
+    );
+    if (result.status === "error") throw new Error(result.error);
+  },
   post_process_selected_prompt_id: (value) =>
     commands.setPostProcessSelectedPrompt(value as string),
   mute_while_recording: (value) =>
@@ -328,6 +338,12 @@ export const useSettingsStore = create<SettingsStore>()(
         const updater = settingUpdaters[key];
         if (updater) {
           await updater(value);
+          if (
+            key === "post_process_enabled" ||
+            key === "post_process_profiles"
+          ) {
+            await get().refreshSettings();
+          }
         } else if (key !== "bindings" && key !== "selected_model") {
           console.warn(`No handler for setting: ${String(key)}`);
         }

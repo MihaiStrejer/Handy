@@ -1,13 +1,17 @@
 import { listen } from "@tauri-apps/api/event";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import "./RecordingOverlay.css";
 import { commands, events } from "@/bindings";
+import { ProfileIcon } from "@/components/icons/ProfileIcon";
 import type {
   StreamPhase,
   StreamPhaseEvent,
   StreamTextEvent,
   StreamWorkKind,
+  SessionDisplay,
+  ProfileIndicator,
 } from "@/bindings";
 import i18n, { syncLanguageFromSettings } from "@/i18n";
 import { getLanguageDirection } from "@/lib/utils/rtl";
@@ -26,6 +30,9 @@ const RecordingOverlay: React.FC = () => {
   // Stay visually in an arming state until the backend processes the first
   // actual microphone sample chunk.
   const [captureReady, setCaptureReady] = useState(false);
+  const [profile, setProfile] = useState<ProfileIndicator | null>(null);
+  const contextSession = useRef<string | null>(null);
+  const showRevision = useRef(0);
   const [levels, setLevels] = useState<number[]>(Array(WAVE_BARS).fill(0));
   const [streamText, setStreamText] = useState<StreamTextEvent>({
     committed: "",
@@ -53,9 +60,19 @@ const RecordingOverlay: React.FC = () => {
   const direction = getLanguageDirection(i18n.language);
 
   useEffect(() => {
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
     const setupEventListeners = async () => {
       const unlistenShow = await listen("show-overlay", async (event) => {
-        const overlayState = event.payload as OverlayState;
+        const revision = ++showRevision.current;
+        const payload = event.payload as
+          | OverlayState
+          | { state: OverlayState; context: SessionDisplay | null };
+        const overlayState =
+          typeof payload === "string" ? payload : payload.state;
+        const context = typeof payload === "string" ? null : payload.context;
+        contextSession.current = context?.enabled ? context.session_id : null;
+        setProfile(context?.enabled ? context.profile : null);
         // Reset synchronously before settings I/O. A fast microphone can emit
         // recording-ready while the awaits below are in flight; resetting after
         // them would overwrite that event and leave the overlay stuck arming.
@@ -71,6 +88,7 @@ const RecordingOverlay: React.FC = () => {
         // bottom one; read the placement so the layout can flip to match.
         try {
           const settings = await commands.getAppSettings();
+          if (disposed || revision !== showRevision.current) return;
           if (settings.status === "ok") {
             setPosition(
               settings.data.overlay_position === "top" ? "top" : "bottom",
@@ -79,6 +97,7 @@ const RecordingOverlay: React.FC = () => {
         } catch {
           // Keep the previous/default placement if settings can't be read.
         }
+        if (disposed || revision !== showRevision.current) return;
         setState(overlayState);
         if (overlayState === "streaming") {
           setPhase("listening");
@@ -90,9 +109,23 @@ const RecordingOverlay: React.FC = () => {
       });
 
       const unlistenHide = await listen("hide-overlay", () => {
+        ++showRevision.current;
+        contextSession.current = null;
+        setProfile(null);
         setIsVisible(false);
         setCaptureReady(false);
       });
+
+      const unlistenContext = await events.sessionDisplay.listen(
+        ({ payload }) => {
+          if (
+            payload.enabled &&
+            payload.session_id === contextSession.current
+          ) {
+            setProfile(payload.profile);
+          }
+        },
+      );
 
       const unlistenReady = await listen("recording-ready", () => {
         setElapsed(0);
@@ -128,10 +161,19 @@ const RecordingOverlay: React.FC = () => {
         unlistenLevel();
         unlistenStream();
         unlistenPhase();
+        unlistenContext();
       };
     };
 
-    setupEventListeners();
+    void setupEventListeners().then((unlisten) => {
+      if (disposed) unlisten();
+      else cleanup = unlisten;
+    });
+    return () => {
+      disposed = true;
+      ++showRevision.current;
+      cleanup?.();
+    };
   }, []);
 
   // Elapsed capture timer starts only once microphone samples are flowing.
@@ -205,7 +247,33 @@ const RecordingOverlay: React.FC = () => {
   const listeningRow = (showTimer: boolean, showCancel: boolean) => (
     <div className="sbase">
       <div className="sbase-l">
-        <span className={`sdot ${captureReady ? "ready" : "arming"}`} />
+        {profile ? (
+          (() => {
+            const label = t("overlay.profileContext", {
+              name: profile.name,
+              mode: t(`overlay.inputMode.${profile.input_mode}`),
+            });
+            return (
+              <span
+                className={`sprofile ${captureReady ? "ready" : "arming"}`}
+                role="img"
+                aria-label={label}
+                title={label}
+              >
+                <ProfileIcon icon={profile.icon} size={16} />
+                {profile.input_mode === "edit" && (
+                  <Pencil
+                    className="sprofile-edit"
+                    size={8}
+                    aria-hidden="true"
+                  />
+                )}
+              </span>
+            );
+          })()
+        ) : (
+          <span className={`sdot ${captureReady ? "ready" : "arming"}`} />
+        )}
       </div>
       {waveform}
       <div className="sbase-r">

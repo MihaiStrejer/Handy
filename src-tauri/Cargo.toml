@@ -75,6 +75,8 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 tar = "0.4.44"
 flate2 = "1.0"
 sha2 = "0.10"
+base64 = "0.22"
+image = { version = "0.25.9", default-features = false, features = ["png", "ico"] }
 # Whisper-family models run through transcribe-cpp (GGUF/ggml, native backends);
 # transcribe-rs is now ONNX-only (Parakeet, Moonshine, SenseVoice, GigaAM,
 # Canary, Cohere). Per-platform backend features are added in the target tables.
@@ -125,6 +127,7 @@ windows = { version = "0.61.3", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Accessibility",
 ] }
 winreg = "0.55"
 

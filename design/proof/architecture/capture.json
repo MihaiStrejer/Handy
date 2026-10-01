@@ -1,0 +1,12 @@
+{
+  "captured_at": "2026-09-27T07:49:30.798Z",
+  "commit": "8f9cf53cd1410cda26beea39ff802ac306e39585",
+  "branch": "feat/context-profiles",
+  "instance": "isolated portable development data; no tenant",
+  "note": "Actual native UI with synthetic profile data. Overlay uses a session event fixture; no voice or external API request.",
+  "viewport": {
+    "width": 680,
+    "height": 570,
+    "scale": 1
+  }
+}

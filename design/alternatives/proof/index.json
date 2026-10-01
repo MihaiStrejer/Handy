@@ -1,0 +1,29 @@
+{
+  "checkedAt": "2026-09-27T08:18:17.975Z",
+  "browser": "Installed Microsoft Edge",
+  "desktop": {
+    "title": "Handy architecture · Four ways to explain it",
+    "overflow": false,
+    "selects": 0,
+    "brokenAnchors": [],
+    "imagesLoaded": true,
+    "headings": [
+      "Follow the flow",
+      "Follow your words",
+      "Follow the owners",
+      "Start with the essentials",
+      "What this round proposes for show-me",
+      "Review status"
+    ]
+  },
+  "mobileOverflow": false,
+  "errors": [],
+  "external": [],
+  "visibleCasesWithoutJavaScript": {
+    "cancellation": true,
+    "focus": true,
+    "field": true,
+    "invalidReply": true,
+    "protectedInput": true
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "checkedAt": "2026-09-27T08:18:09.867Z",
+  "browser": "Installed Microsoft Edge",
+  "desktop": {
+    "title": "Handy · C · Who owns each step?",
+    "overflow": false,
+    "selects": 0,
+    "brokenAnchors": [],
+    "imagesLoaded": true,
+    "headings": [
+      "Follow the handoffs",
+      "Two messages per utterance",
+      "Five ways the handoff stops",
+      "What is still here when you speak again?",
+      "The remaining learning decision",
+      "Evidence and limits"
+    ]
+  },
+  "mobileOverflow": false,
+  "errors": [],
+  "external": [],
+  "visibleCasesWithoutJavaScript": {
+    "cancellation": true,
+    "focus": true,
+    "field": true,
+    "invalidReply": true,
+    "protectedInput": true
+  }
+}

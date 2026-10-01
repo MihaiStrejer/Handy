@@ -1,0 +1,87 @@
+{
+  "contentWidth": 1440,
+  "subtitleWidth": 1440,
+  "headingSize": "28px",
+  "pills": 0,
+  "question": "G1. What evidence permits automatic learning?",
+  "extraQuestionTitle": false,
+  "diagramConnectorStyles": [
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none"
+  ],
+  "imagesLoaded": true,
+  "missingAnchors": [],
+  "squareSamples": [
+    {
+      "selector": ".request",
+      "radius": "0px"
+    },
+    {
+      "selector": ".message pre",
+      "radius": "0px"
+    },
+    {
+      "selector": ".reply-flow pre",
+      "radius": "0px"
+    },
+    {
+      "selector": ".gap-card",
+      "radius": "0px"
+    },
+    {
+      "selector": ".option",
+      "radius": "0px"
+    }
+  ],
+  "outputHeading": "Follow the reply through Handy",
+  "separatePersistence": true,
+  "sidebarWidth": 200,
+  "centeredWithinPane": true,
+  "widths": [
+    {
+      "width": 1920,
+      "overflow": false
+    },
+    {
+      "width": 1688,
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "width": 1200,
+      "overflow": false
+    },
+    {
+      "width": 900,
+      "overflow": false
+    },
+    {
+      "width": 390,
+      "overflow": false
+    }
+  ],
+  "sidebar": {
+    "keyboardToggle": true,
+    "collapsedWidth": 48,
+    "collapsedContentWidth": 1440,
+    "independent": {
+      "navScrollable": true,
+      "navMoved": true,
+      "contentUnchanged": true,
+      "navUnchanged": true,
+      "bodyStayedPut": true
+    }
+  },
+  "externalRequests": [],
+  "javascript": "disabled",
+  "checkedAt": "2026-09-27T10:34:32.739Z"
+}

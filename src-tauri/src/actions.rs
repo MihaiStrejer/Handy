@@ -2,8 +2,10 @@
 use crate::apple_intelligence;
 use crate::audio_feedback::{play_feedback_sound, play_feedback_sound_blocking, SoundType};
 use crate::audio_toolkit::{is_microphone_access_denied, is_no_input_device_error, VadPolicy};
+use crate::context_profiles::{capture_target, SessionId, SessionStore};
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::history::HistoryManager;
+use crate::managers::history_processing::{RunGuard, RunSnapshot};
 use crate::managers::model::ModelManager;
 use crate::managers::transcription::StreamWorkKind;
 use crate::managers::transcription::TranscriptionManager;
@@ -34,7 +36,23 @@ struct RecordingErrorEvent {
 
 /// Drop guard that finishes the transcription pipeline, including immediate
 /// model unloading on early exits.
-struct FinishGuard(AppHandle, Arc<TranscriptionManager>);
+struct FinishGuard(
+    AppHandle,
+    Arc<TranscriptionManager>,
+    Option<Arc<ContextSessionGuard>>,
+);
+
+// Shared with the queued paste closure so the context outlives asynchronous
+// dispatch. Old cleanup is scoped to its ID and cannot clear a newer session.
+struct ContextSessionGuard(AppHandle, SessionId);
+impl Drop for ContextSessionGuard {
+    fn drop(&mut self) {
+        if let Err(error) = self.0.state::<SessionStore>().finish(self.1) {
+            error!("{error}");
+        }
+    }
+}
+
 impl Drop for FinishGuard {
     fn drop(&mut self) {
         self.1.maybe_unload_immediately("transcription session");
@@ -119,7 +137,11 @@ fn should_use_streaming_overlay(style: OverlayStyle, is_streaming: bool) -> bool
     style == OverlayStyle::Live && is_streaming
 }
 
-async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
+async fn post_process_transcription(
+    settings: &AppSettings,
+    transcription: &str,
+    run: Option<&RunGuard>,
+) -> Option<String> {
     if is_blank_transcription(transcription) {
         debug!("Post-processing skipped because the transcription is empty");
         return None;
@@ -191,6 +213,7 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
     // field the endpoint understands and retries without it if rejected.
     let disable_reasoning = matches!(provider.id.as_str(), "custom" | "openrouter");
 
+    let mut schema_fallback = false;
     if provider.supports_structured_output {
         debug!("Using structured outputs for provider '{}'", provider.id);
 
@@ -254,7 +277,7 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
             "additionalProperties": false
         });
 
-        match crate::llm_client::send_chat_completion_with_schema(
+        match crate::llm_client::send_chat_completion_observed(
             &provider,
             api_key.clone(),
             &model,
@@ -262,6 +285,11 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
             Some(system_prompt),
             Some(json_schema),
             disable_reasoning,
+            run.map(|run| crate::llm_client::CallContext {
+                run,
+                purpose: "rewrite",
+                retry_of: None,
+            }),
         )
         .await
         {
@@ -299,6 +327,7 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
                 return None;
             }
             Err(e) => {
+                schema_fallback = true;
                 warn!(
                     "Structured output failed for provider '{}': {}. Falling back to legacy mode.",
                     provider.id, e
@@ -312,12 +341,23 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
     let processed_prompt = prompt.replace("${output}", transcription);
     debug!("Processed prompt length: {} chars", processed_prompt.len());
 
-    match crate::llm_client::send_chat_completion(
+    match crate::llm_client::send_chat_completion_observed(
         &provider,
         api_key,
         &model,
         processed_prompt,
+        None,
+        None,
         disable_reasoning,
+        run.map(|run| crate::llm_client::CallContext {
+            run,
+            purpose: "rewrite",
+            retry_of: if schema_fallback {
+                run.latest_call_id().ok().flatten()
+            } else {
+                None
+            },
+        }),
     )
     .await
     {
@@ -397,6 +437,8 @@ pub(crate) struct ProcessedTranscription {
     pub final_text: String,
     pub post_processed_text: Option<String>,
     pub post_process_prompt: Option<String>,
+    pub processing_error_code: Option<&'static str>,
+    pub output_block: Option<&'static str>,
 }
 
 /// Resolve the persisted language *intent* into the language the currently-loaded
@@ -425,7 +467,31 @@ pub(crate) async fn process_transcription_output(
     transcription: &str,
     post_process: bool,
 ) -> ProcessedTranscription {
+    process_transcription_output_observed(app, transcription, post_process, None).await
+}
+
+pub(crate) async fn process_transcription_output_observed(
+    app: &AppHandle,
+    transcription: &str,
+    post_process: bool,
+    run: Option<&RunGuard>,
+) -> ProcessedTranscription {
     let settings = get_settings(app);
+    // History retry has no captured target or frozen context. It cannot borrow
+    // a live recording's context or silently fall through to raw-text output.
+    if post_process && settings.post_process_profiles {
+        let _ = app.emit(
+            "transcription-error",
+            "History retry has no captured profile context; disable profiles to use ordinary post-processing",
+        );
+        return ProcessedTranscription {
+            final_text: String::new(),
+            post_processed_text: None,
+            post_process_prompt: None,
+            processing_error_code: Some("profile_retry_unavailable"),
+            output_block: None,
+        };
+    }
     let mut final_text = transcription.to_string();
     let mut post_processed_text: Option<String> = None;
     let mut post_process_prompt: Option<String> = None;
@@ -441,7 +507,8 @@ pub(crate) async fn process_transcription_output(
     }
 
     if post_process {
-        if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
+        if let Some(processed_text) = post_process_transcription(&settings, &final_text, run).await
+        {
             post_processed_text = Some(processed_text.clone());
             final_text = processed_text;
 
@@ -451,7 +518,12 @@ pub(crate) async fn process_transcription_output(
                     .iter()
                     .find(|prompt| &prompt.id == prompt_id)
                 {
-                    post_process_prompt = Some(prompt.prompt.clone());
+                    if run.is_none()
+                        && settings.save_history_request_contents
+                        && prompt.prompt.len() <= 1024 * 1024
+                    {
+                        post_process_prompt = Some(prompt.prompt.clone());
+                    }
                 }
             }
         }
@@ -459,11 +531,90 @@ pub(crate) async fn process_transcription_output(
         post_processed_text = Some(final_text.clone());
     }
 
+    let processing_error_code = if post_process && post_processed_text.is_none() {
+        Some(
+            if settings
+                .active_post_process_provider()
+                .and_then(|provider| settings.post_process_models.get(&provider.id))
+                .is_none_or(|model| model.trim().is_empty())
+            {
+                "missing_model"
+            } else {
+                "processing_failed"
+            },
+        )
+    } else {
+        None
+    };
     ProcessedTranscription {
         final_text,
         post_processed_text,
         post_process_prompt,
+        processing_error_code,
+        output_block: None,
     }
+}
+
+fn profile_output(
+    output: crate::context_profiles::request::ProfileOutput,
+) -> ProcessedTranscription {
+    ProcessedTranscription {
+        final_text: if output.output_block.is_none() {
+            output.text.clone()
+        } else {
+            String::new()
+        },
+        post_processed_text: Some(output.text),
+        post_process_prompt: None,
+        processing_error_code: None,
+        output_block: output.output_block,
+    }
+}
+
+async fn process_live_transcription_output(
+    app: &AppHandle,
+    transcription: &str,
+    post_process: bool,
+    session: Option<SessionId>,
+    generation: u64,
+    profile_mode: bool,
+    run: Option<&RunGuard>,
+) -> ProcessedTranscription {
+    if let Some(id) = session.filter(|_| profile_mode) {
+        let result = crate::context_profiles::request::process(
+            app,
+            &get_settings(app),
+            id,
+            generation,
+            transcription,
+            run,
+        )
+        .await;
+        return match result {
+            Ok(output) => {
+                if output.output_block.is_some() {
+                    let _ = app.emit(
+                        "transcription-error",
+                        "Input changed or could not be verified; output was not inserted",
+                    );
+                }
+                profile_output(output)
+            }
+            Err(error) => {
+                warn!("{error}");
+                let processing_error_code = crate::context_profiles::request::failure_code(&error);
+                let _ = app.emit("transcription-error", error);
+                ProcessedTranscription {
+                    final_text: String::new(),
+                    post_processed_text: None,
+                    post_process_prompt: None,
+                    processing_error_code: Some(processing_error_code),
+                    output_block: None,
+                }
+            }
+        };
+    }
+    process_transcription_output_observed(app, transcription, post_process, run).await
 }
 
 impl ShortcutAction for TranscribeAction {
@@ -474,6 +625,28 @@ impl ShortcutAction for TranscribeAction {
         // Load model in the background
         let tm = app.state::<Arc<TranscriptionManager>>();
         let rm = app.state::<Arc<AudioRecordingManager>>();
+        let settings = get_settings(app);
+
+        // Capture only native identity here, before showing the overlay. Slow
+        // accessibility enrichment belongs off the microphone startup path.
+        let context_session = match app.state::<SessionStore>().begin(
+            rm.cancel_generation(),
+            (self.post_process && settings.post_process_enabled && settings.post_process_profiles)
+                .then(capture_target)
+                .flatten(),
+            self.post_process && settings.post_process_enabled && settings.post_process_profiles,
+        ) {
+            Ok(id) => Some(id),
+            Err(error) => {
+                error!("{error}");
+                None
+            }
+        };
+        if self.post_process && settings.post_process_enabled && settings.post_process_profiles {
+            if let Some(id) = context_session {
+                crate::context_profiles::start_capture(app.clone(), id, Arc::clone(&rm));
+            }
+        }
 
         // Load ASR model and VAD model in parallel
         let kickoff_started = Instant::now();
@@ -493,7 +666,6 @@ impl ShortcutAction for TranscribeAction {
 
         // Get the microphone mode to determine audio feedback timing
         let plan_started = Instant::now();
-        let settings = get_settings(app);
         let is_always_on = settings.always_on_microphone;
 
         let selected_model_info = app
@@ -602,6 +774,11 @@ impl ShortcutAction for TranscribeAction {
             shortcut::register_cancel_shortcut(app);
         } else {
             // Starting failed (for example due to blocked microphone permissions).
+            if let Some(id) = context_session {
+                if let Err(error) = app.state::<SessionStore>().finish(id) {
+                    error!("{error}");
+                }
+            }
             // Revert UI state so we don't stay stuck in the recording overlay.
             tm.cancel_stream();
             utils::hide_recording_overlay(app);
@@ -671,9 +848,20 @@ impl ShortcutAction for TranscribeAction {
         let binding_id = binding_id.to_string(); // Clone binding_id for the async task
         let post_process = self.post_process;
         let cancel_generation = rm.cancel_generation();
+        let context_session = match app.state::<SessionStore>().current(cancel_generation) {
+            Ok(id) => id,
+            Err(error) => {
+                error!("{error}");
+                None
+            }
+        };
+        let profile_mode =
+            context_session.is_some_and(|id| app.state::<SessionStore>().uses_profiles(id));
 
         tauri::async_runtime::spawn(async move {
-            let _guard = FinishGuard(ah.clone(), Arc::clone(&tm));
+            let context_guard =
+                context_session.map(|id| Arc::new(ContextSessionGuard(ah.clone(), id)));
+            let _guard = FinishGuard(ah.clone(), Arc::clone(&tm), context_guard);
             debug!(
                 "Starting async transcription task for binding: {}",
                 binding_id
@@ -775,13 +963,102 @@ impl ShortcutAction for TranscribeAction {
                                     show_processing_overlay(&ah);
                                 }
                             }
+                            // Persist the original before any provider work, so a cancelled or
+                            // failed request still belongs to a durable entry.
+                            let history_entry = if wav_saved {
+                                match hm.save_entry(
+                                    file_name.clone(),
+                                    transcription.clone(),
+                                    post_process,
+                                    None,
+                                    None,
+                                ) {
+                                    Ok(entry) => Some(entry),
+                                    Err(error) => {
+                                        error!("Details could not be saved: {error}");
+                                        None
+                                    }
+                                }
+                            } else {
+                                None
+                            };
+                            let settings = get_settings(&ah);
+                            let mut run = if post_process {
+                                history_entry.as_ref().and_then(|entry| {
+                                    let snapshot = RunSnapshot {
+                                        session_id: context_session.map(|id| format!("{id:?}")),
+                                        provider_id: settings
+                                            .active_post_process_provider()
+                                            .map(|provider| provider.id.clone()),
+                                        provider_name: settings
+                                            .active_post_process_provider()
+                                            .map(|provider| provider.label.clone()),
+                                        requested_model: settings
+                                            .active_post_process_provider()
+                                            .and_then(|provider| {
+                                                settings.post_process_models.get(&provider.id)
+                                            })
+                                            .cloned(),
+                                        prompt_template: settings
+                                            .post_process_selected_prompt_id
+                                            .as_ref()
+                                            .and_then(|prompt_id| {
+                                                settings
+                                                    .post_process_prompts
+                                                    .iter()
+                                                    .find(|prompt| &prompt.id == prompt_id)
+                                            })
+                                            .map(|prompt| prompt.prompt.clone()),
+                                        prompt_source: Some(
+                                            if profile_mode {
+                                                "profile"
+                                            } else {
+                                                "selected_prompt"
+                                            }
+                                            .into(),
+                                        ),
+                                        ..RunSnapshot::default()
+                                    };
+                                    match hm.start_processing_run(
+                                        entry.id,
+                                        &transcription,
+                                        snapshot,
+                                        settings.save_history_request_contents,
+                                    ) {
+                                        Ok(run) => Some(run),
+                                        Err(error) => {
+                                            error!("Details could not be saved: {error}");
+                                            None
+                                        }
+                                    }
+                                })
+                            } else {
+                                None
+                            };
+                            if run.is_some() {
+                                if let Some(entry) = &history_entry {
+                                    let _ = hm.emit_entry_update(entry.id);
+                                }
+                            }
                             let Some(processed) = complete_unless_cancelled(
-                                process_transcription_output(&ah, &transcription, post_process),
+                                process_live_transcription_output(
+                                    &ah,
+                                    &transcription,
+                                    post_process,
+                                    context_session,
+                                    cancel_generation,
+                                    profile_mode,
+                                    run.as_ref(),
+                                ),
                                 || rm.was_cancelled_since(cancel_generation),
                             )
                             .await
                             else {
                                 debug!("Transcription operation cancelled during output handling");
+                                drop(run);
+                                if let Some(entry) = &history_entry {
+                                    let _ = hm.emit_entry_update(entry.id);
+                                }
                                 utils::hide_recording_overlay(&ah);
                                 set_tray_state(&ah, TrayIconState::Idle);
                                 return;
@@ -789,22 +1066,48 @@ impl ShortcutAction for TranscribeAction {
 
                             if rm.was_cancelled_since(cancel_generation) {
                                 debug!("Transcription operation cancelled before paste");
+                                drop(run);
+                                if let Some(entry) = &history_entry {
+                                    let _ = hm.emit_entry_update(entry.id);
+                                }
                                 utils::hide_recording_overlay(&ah);
                                 set_tray_state(&ah, TrayIconState::Idle);
                                 return;
                             }
 
-                            // Save to history if WAV was saved
-                            if wav_saved {
-                                if let Err(err) = hm.save_entry(
-                                    file_name,
-                                    transcription,
-                                    post_process,
+                            if let Some(entry) = &history_entry {
+                                if let Err(error) = hm.update_transcription(
+                                    entry.id,
+                                    transcription.clone(),
                                     processed.post_processed_text.clone(),
-                                    processed.post_process_prompt.clone(),
+                                    if run.is_some() {
+                                        None
+                                    } else {
+                                        processed.post_process_prompt.clone()
+                                    },
                                 ) {
-                                    error!("Failed to save history entry: {}", err);
+                                    error!("Failed to update history entry: {error}");
                                 }
+                            }
+                            if let Some(ref mut run) = run {
+                                let status = if processed.processing_error_code.is_some() {
+                                    "failed"
+                                } else {
+                                    "succeeded"
+                                };
+                                if let Err(error) = run.finish(
+                                    status,
+                                    processed.post_processed_text.as_deref(),
+                                    processed.processing_error_code,
+                                    None,
+                                    Some(processed.output_block.unwrap_or("not_dispatched")),
+                                    None,
+                                ) {
+                                    error!("Details could not be saved: {error}");
+                                }
+                            }
+                            if let Some(entry) = &history_entry {
+                                let _ = hm.emit_entry_update(entry.id);
                             }
 
                             if processed.final_text.is_empty() {
@@ -813,22 +1116,60 @@ impl ShortcutAction for TranscribeAction {
                             } else {
                                 let ah_clone = ah.clone();
                                 let paste_time = Instant::now();
+                                let output_is_original = processed.processing_error_code.is_some();
                                 let final_text = processed.final_text;
                                 let rm_for_paste = Arc::clone(&rm);
+                                let context_for_paste = _guard.2.clone();
+                                let run_id = run.as_ref().map(RunGuard::id);
+                                let hm_for_paste = Arc::clone(&hm);
                                 ah.run_on_main_thread(move || {
+                                    let _context_guard = context_for_paste;
+                                    // A newer recording may start after transcription finishes
+                                    // but before this queued callback runs. Its generation can
+                                    // be unchanged, so also compare the unique session ID.
+                                    if context_session.is_some() && ah_clone.state::<SessionStore>().current(cancel_generation).ok().flatten() != context_session {
+                                        if let Some(id) = run_id { let _ = hm_for_paste.set_run_output(id, "blocked_focus_changed", Some(stop_time.elapsed().as_millis() as i64)); }
+                                        return;
+                                    }
                                     if rm_for_paste.was_cancelled_since(cancel_generation) {
+                                        if let Some(id) = run_id { let _ = hm_for_paste.set_run_output(id, "cancelled", Some(stop_time.elapsed().as_millis() as i64)); }
                                         debug!("Transcription operation cancelled before paste");
                                         utils::hide_recording_overlay(&ah_clone);
                                         set_tray_state(&ah_clone, TrayIconState::Idle);
                                         return;
                                     }
 
+                                    if let Some(id) = context_session.filter(|_| profile_mode) {
+                                        if !crate::context_profiles::request::output_target_is_current(&ah_clone, id) {
+                                            if let Some(id) = run_id { let _ = hm_for_paste.set_run_output(id, "blocked_focus_changed", Some(stop_time.elapsed().as_millis() as i64)); }
+                                            let _ = ah_clone.emit("transcription-error", "Input focus changed while processing; output was not inserted");
+                                            utils::hide_recording_overlay(&ah_clone);
+                                            set_tray_state(&ah_clone, TrayIconState::Idle);
+                                            return;
+                                        }
+                                    }
+
+                                    let output_settings = crate::settings::get_settings(&ah_clone);
+                                    let can_learn = profile_mode && !output_is_original && output_settings.paste_method != crate::settings::PasteMethod::None;
+                                    let inserted = if output_settings.append_trailing_space { format!("{final_text} ") } else { final_text.clone() };
                                     match utils::paste(final_text, ah_clone.clone()) {
-                                        Ok(()) => debug!(
-                                            "Text pasted successfully in {:?}",
-                                            paste_time.elapsed()
-                                        ),
+                                        Ok(()) => {
+                                            if let Some(id) = run_id { let _ = hm_for_paste.set_run_output(id, if output_is_original { "original_dispatched" } else { "dispatched" }, Some(stop_time.elapsed().as_millis() as i64)); }
+                                            debug!("Text pasted successfully in {:?}", paste_time.elapsed());
+                                            if let Some(id) = context_session.filter(|_| can_learn) {
+                                                let verification_app = ah_clone.clone();
+                                                let verification_audio = Arc::clone(&rm_for_paste);
+                                                let verification_guard = _context_guard.clone();
+                                                tauri::async_runtime::spawn_blocking(move || {
+                                                    let _guard = verification_guard;
+                                                    if let Err(error) = crate::context_profiles::feedback::verify_and_remember(&verification_app, id, &inserted, &verification_audio) {
+                                                        log::warn!("Correction memory was not updated: {error}");
+                                                    }
+                                                });
+                                            }
+                                        }
                                         Err(e) => {
+                                            if let Some(id) = run_id { let _ = hm_for_paste.set_run_output(id, "failed", Some(stop_time.elapsed().as_millis() as i64)); }
                                             error!("Failed to paste transcription: {}", e);
                                             let _ = ah_clone.emit("paste-error", ());
                                         }
@@ -837,6 +1178,7 @@ impl ShortcutAction for TranscribeAction {
                                     set_tray_state(&ah_clone, TrayIconState::Idle);
                                 })
                                 .unwrap_or_else(|e| {
+                                    if let Some(id) = run_id { let _ = hm.set_run_output(id, "scheduling_failed", Some(stop_time.elapsed().as_millis() as i64)); }
                                     error!("Failed to run paste on main thread: {:?}", e);
                                     utils::hide_recording_overlay(&ah);
                                     set_tray_state(&ah, TrayIconState::Idle);
@@ -962,6 +1304,21 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
+
+    #[test]
+    fn blocked_profile_output_keeps_rewrite_without_claiming_processing_failure() {
+        let result = super::profile_output(crate::context_profiles::request::ProfileOutput {
+            text: "A valid rewrite".into(),
+            output_block: Some("blocked_input_changed"),
+        });
+        assert!(result.final_text.is_empty());
+        assert_eq!(
+            result.post_processed_text.as_deref(),
+            Some("A valid rewrite")
+        );
+        assert!(result.processing_error_code.is_none());
+        assert_eq!(result.output_block, Some("blocked_input_changed"));
+    }
 
     #[test]
     fn blank_transcription_is_detected() {

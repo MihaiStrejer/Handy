@@ -1,0 +1,26 @@
+{
+  "checked_at": "2026-09-27T08:19:58.529Z",
+  "browser": "Installed Microsoft Edge",
+  "evidence": {
+    "images": [
+      {
+        "loaded": true,
+        "inline": true
+      },
+      {
+        "loaded": true,
+        "inline": true
+      },
+      {
+        "loaded": true,
+        "inline": true
+      }
+    ],
+    "missingAnchors": [],
+    "desktopOverflow": false
+  },
+  "mobileOverflow": false,
+  "scriptErrors": [],
+  "externalRequests": [],
+  "interactions": "Step navigation; three scenarios; payload/reply update; failure branch; source disclosure"
+}

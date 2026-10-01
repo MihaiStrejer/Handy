@@ -589,7 +589,10 @@ fn show_overlay_state_on_main(app_handle: &AppHandle, state: &str) {
             );
         }
 
-        let _ = overlay_window.emit("show-overlay", state);
+        let _ = overlay_window.emit("show-overlay", serde_json::json!({
+            "state": state,
+            "context": app_handle.state::<crate::context_profiles::SessionStore>().display().ok().flatten(),
+        }));
     }
 }
 

@@ -1,0 +1,27 @@
+{
+  "missingAnchors": [],
+  "images": [
+    {
+      "loaded": true,
+      "width": 680
+    },
+    {
+      "loaded": true,
+      "width": 680
+    },
+    {
+      "loaded": true,
+      "width": 256
+    }
+  ],
+  "desktopOverflow": false,
+  "missingLocalLinks": [
+    "file:///D:/rust/Handy/design/alternatives/round-3/index.html"
+  ],
+  "mobileOverflow": false,
+  "externalRequests": [],
+  "javascript": "disabled",
+  "desktop": "1440x1000",
+  "mobile": "390x844",
+  "checkedAt": "2026-09-27T09:07:45.085Z"
+}

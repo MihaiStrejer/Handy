@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Handy recording profile placement</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 30px; background: #fbfafb; color: #302a2e; font: 14px/1.5 "Segoe UI", sans-serif; }
+    main { max-width: 820px; margin: auto; }
+    h1 { font-size: 23px; margin: 0 0 6px; }
+    p { margin: 0 0 22px; color: #665b62; }
+    .states { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    article { background: white; border: 1px solid #e0d7dc; border-radius: 10px; overflow: hidden; }
+    h2 { font-size: 14px; margin: 13px 16px 0; }
+    article p { font-size: 12px; margin: 3px 16px 12px; }
+    .stage { background: #1e1c1d; height: 88px; display: grid; place-items: center; }
+    .pill { width: 172px; height: 40px; padding: 0 10px; display: grid; grid-template-columns: minmax(22px, 1fr) auto minmax(22px, 1fr); align-items: center; border-radius: 22px; background: #2c292b; border: 1px solid #494247; color: #efa3c4; }
+    .left { justify-self: start; padding-left: 5px; display: flex; align-items: center; position: relative; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #efa3c4; }
+    .icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .edit { position: absolute; width: 10px; height: 10px; bottom: -4px; right: -5px; border-radius: 3px; color: #fff3f8; background: #704253; stroke-width: 1.8; }
+    .wave { display: flex; align-items: center; gap: 3px; height: 20px; }
+    .wave i { display: block; width: 3px; height: 3px; background: currentColor; border-radius: 3px; }
+    .wave i:nth-child(3n) { height: 8px; }
+    .wave i:nth-child(4n) { height: 12px; }
+    .cancel { justify-self: end; width: 22px; height: 22px; border-radius: 50%; background: #403a3e; display: grid; place-items: center; color: #c8bdc3; }
+    .cancel svg { width: 10px; height: 10px; }
+    footer { margin-top: 16px; color: #665b62; font-size: 12px; }
+    @media (max-width: 620px) { .states { grid-template-columns: 1fr; } body { padding: 18px; } }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="terminal" viewBox="0 0 20 20"><rect x="2" y="3" width="16" height="14" rx="3"/><path d="m6 7 3 3-3 3m5 0h3"/></symbol>
+      <symbol id="general" viewBox="0 0 20 20"><circle cx="10" cy="7" r="3"/><path d="M4 17v-2c0-4 12-4 12 0v2"/></symbol>
+      <symbol id="pencil" viewBox="0 0 20 20"><path d="m4 13 9-9 3 3-9 9-4 1 1-4Z"/></symbol>
+      <symbol id="cross" viewBox="0 0 20 20"><path d="m5 5 10 10M15 5 5 15"/></symbol>
+    </defs>
+  </svg>
+  <main>
+    <h1>Profile icon replaces the left dot</h1>
+    <p>The existing left slot carries the resolved profile. Waveform stays centered; Cancel stays right.</p>
+    <div class="states">
+      <article><h2>Current indicator / profile lookup pending</h2><p>The dot remains until a profile is identified.</p><div class="stage"><div class="pill" role="img" aria-label="Recording, finding profile"><span class="left"><span class="dot"></span></span><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="cancel"><svg class="icon"><use href="#cross"/></svg></span></div></div></article>
+      <article><h2>Handy workspace · compose</h2><p>The terminal profile icon occupies the dot's position.</p><div class="stage"><div class="pill" role="img" aria-label="Recording, Handy workspace, compose"><span class="left" title="Handy workspace · Compose"><svg class="icon"><use href="#terminal"/></svg></span><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="cancel"><svg class="icon"><use href="#cross"/></svg></span></div></div></article>
+      <article><h2>Handy workspace · edit selection</h2><p>A proposed small edit badge retains profile identity.</p><div class="stage"><div class="pill" role="img" aria-label="Recording, Handy workspace, edit selection"><span class="left" title="Handy workspace · Edit selection"><svg class="icon"><use href="#terminal"/></svg><svg class="icon edit"><use href="#pencil"/></svg></span><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="cancel"><svg class="icon"><use href="#cross"/></svg></span></div></div></article>
+      <article><h2>General · fallback profile</h2><p>The generic profile icon identifies the actual fallback.</p><div class="stage"><div class="pill" role="img" aria-label="Recording, General fallback profile, compose"><span class="left" title="General · Compose"><svg class="icon"><use href="#general"/></svg></span><span class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="cancel"><svg class="icon"><use href="#cross"/></svg></span></div></div></article>
+    </div>
+    <footer>Placement mockup using 172 × 40 px pills. Icons and the edit badge are illustrative. Profile names are shown here as captions and are available on hover in the pill.</footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,31 @@
+{
+  "checkedAt": "2026-09-27T08:14:52.868Z",
+  "browser": "Installed Microsoft Edge",
+  "desktop": {
+    "title": "Handy · A · One visible flow",
+    "overflow": false,
+    "selects": 0,
+    "brokenAnchors": [],
+    "imagesLoaded": true,
+    "headings": [
+      "Start Handy → load configuration",
+      "Invoke post-process recording",
+      "Capture the destination while you speak",
+      "Send two messages in one fresh request",
+      "Accept a prediction only if it passes",
+      "Recheck focus → dispatch existing paste",
+      "Automatic learning stops here",
+      "What proves output completed before learning?"
+    ]
+  },
+  "mobileOverflow": false,
+  "errors": [],
+  "external": [],
+  "visibleCasesWithoutJavaScript": {
+    "cancellation": true,
+    "focus": true,
+    "field": true,
+    "invalidReply": true,
+    "protectedInput": true
+  }
+}

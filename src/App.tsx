@@ -51,6 +51,12 @@ const renderSettingsContent = (
 
 function App() {
   const { t, i18n } = useTranslation();
+  useEffect(() => {
+    const unlisten = listen<number>("history-details-warning", () => {
+      toast.error(t("settings.history.inspector.detailsSaveFailed"));
+    });
+    return () => { void unlisten.then((stop) => stop()); };
+  }, [t]);
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep | null>(
     null,
   );
@@ -62,6 +68,11 @@ function App() {
   const [currentSection, setCurrentSection] =
     useState<SidebarSection>("general");
   const { settings, updateSetting } = useSettings();
+  useEffect(() => {
+    if (settings && !SECTIONS_CONFIG[currentSection].enabled(settings)) {
+      setCurrentSection("general");
+    }
+  }, [settings, currentSection]);
   const direction = getLanguageDirection(i18n.language);
   const refreshAudioDevices = useSettingsStore(
     (state) => state.refreshAudioDevices,
@@ -365,9 +376,22 @@ function App() {
             onSectionChange={setCurrentSection}
           />
           {/* Scrollable content area */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div ref={settingsScrollRef} className="flex-1 overflow-y-auto">
-              <div className="flex flex-col items-center p-4 gap-4">
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+            <div
+              ref={settingsScrollRef}
+              className={
+                currentSection === "profiles"
+                  ? "flex-1 min-h-0 overflow-hidden"
+                  : "flex-1 overflow-y-auto"
+              }
+            >
+              <div
+                className={
+                  currentSection === "profiles"
+                    ? "flex h-full min-h-0 min-w-0 flex-col items-stretch"
+                    : "flex flex-col items-center p-4 gap-4"
+                }
+              >
                 <AccessibilityPermissions />
                 <SecureInputWarning />
                 {renderSettingsContent(currentSection, setOnboardingPreview)}

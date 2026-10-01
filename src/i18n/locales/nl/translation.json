@@ -16,7 +16,8 @@
     "postProcessing": "Naverwerking",
     "history": "Geschiedenis",
     "debug": "Probleemoplossing",
-    "about": "Over Handy"
+    "about": "Over Handy",
+    "profiles": "Profiles"
   },
   "onboarding": {
     "subtitle": "Kies een transcriptiemodel om aan de slag te gaan",
@@ -455,6 +456,194 @@
       }
     },
     "history": {
+      "inspector": {
+        "title": "Post-processing details",
+        "open": "Inspect post-processing",
+        "close": "Close details",
+        "loading": "Loading details?",
+        "loadError": "Details could not be loaded.",
+        "reload": "Reload details",
+        "attempt": "Attempt",
+        "attemptNumber": "Attempt {{number}}",
+        "tabsLabel": "Post-processing details",
+        "tab": {
+          "overview": "Overview",
+          "requests": "Requests",
+          "calls": "Calls"
+        },
+        "copied": "Copied",
+        "provider": "Provider",
+        "model": "Model",
+        "profile": "Profile",
+        "duration": "Processing time",
+        "durationSeconds": "{{seconds}} s",
+        "tokens": "Tokens",
+        "cost": "Cost",
+        "output": "Output",
+        "stopToOutput": "Stop to output",
+        "validatedAction": "Returned action (not applied)",
+        "notReported": "Not reported",
+        "unavailable": "Unavailable",
+        "costUnavailableReason": "Requires complete usage and a verified price for this model and endpoint.",
+        "knownOnly": "Known usage",
+        "estimated": "Est.",
+        "knownEstimated": "Known est.",
+        "original": "Original",
+        "processed": "Processed output",
+        "template": "Saved prompt template",
+        "copyOriginal": "Copy original",
+        "copyProcessed": "Copy processed",
+        "copyTemplate": "Copy template",
+        "legacy": "Details not recorded for this entry.",
+        "noRequest": "No request was sent.",
+        "noProviderRequest": "No provider request was sent for this attempt.",
+        "noCalls": "No provider calls were recorded for this attempt.",
+        "exactRequest": "Exact sent request JSON",
+        "copyRequest": "Copy request JSON",
+        "callsLabel": "Provider calls",
+        "callNumber": "Call {{number}}",
+        "statusLabel": "HTTP / outcome",
+        "returnedModel": "Returned model",
+        "inputTokens": "Input tokens",
+        "cachedTokens": "Cached input",
+        "cacheWriteTokens": "Cache write",
+        "outputTokens": "Output tokens",
+        "totalTokens": "Total tokens",
+        "retryOf": "Retry of call ID",
+        "providerRequestId": "Provider request ID",
+        "cacheHit": "Compatibility check reused a local result; no provider call was sent.",
+        "saveRequests": "Save request contents in history",
+        "saveRequestsDescription": "New saved requests include the exact prompts and application context sent to the provider. Existing requests remain until cleared.",
+        "clearRequests": "Clear saved request contents",
+        "archiveCleared": "Saved request contents cleared.",
+        "archiveUpdateError": "Could not change request retention.",
+        "archiveClearError": "Could not clear saved requests.",
+        "status": {
+          "running": "Processing",
+          "succeeded": "Post-processed",
+          "failed": "Post-process failed",
+          "cancelled": "Cancelled",
+          "interrupted": "Interrupted",
+          "legacy": "Post-processing details unavailable",
+          "transcriptionOnly": "Transcription only"
+        },
+        "purpose": {
+          "compatibility": "Compatibility check",
+          "rewrite": "Rewrite"
+        },
+        "archive": {
+          "retained": "Saved request",
+          "disabled": "Request saving was off for this call.",
+          "cleared": "Saved request contents were cleared.",
+          "omitted_too_large": "Request exceeded the 1 MiB archive limit and was not saved.",
+          "not_recorded": "Request contents were not recorded."
+        },
+        "outputStatus": {
+          "not_dispatched": "Not inserted",
+          "dispatched": "Paste dispatched; destination acceptance is not verified",
+          "original_dispatched": "Original text paste dispatched; destination acceptance is not verified",
+          "failed": "Paste failed",
+          "cancelled": "Cancelled before insertion",
+          "blocked_focus_changed": "Input focus changed; output was not inserted",
+          "blocked_input_changed": "Input changed; output was not inserted",
+          "blocked_input_recheck": "Input could not be verified; output was not inserted",
+          "scheduling_failed": "Output could not be scheduled",
+          "history_only": "History retry; no paste was attempted"
+        },
+        "profileRevision": "Profile revision",
+        "promptSource": "Prompt source",
+        "promptSourceValue": {
+          "general": "General",
+          "inherited": "Inherited from General",
+          "custom": "Profile override",
+          "selected_prompt": "Selected prompt",
+          "retry_current_settings": "Retry with current settings",
+          "profile": "Profile"
+        },
+        "action": {
+          "insert": "Insert",
+          "replace_selection": "Replace selection"
+        },
+        "effect": {
+          "none": "No proposed learning",
+          "add_misheard_form": "Proposed mishearing",
+          "remember": "Proposed memory"
+        },
+        "callOutcome": {
+          "dispatched": "Dispatched",
+          "succeeded": "Succeeded",
+          "failed": "Failed",
+          "cancelled": "Cancelled",
+          "interrupted": "Interrupted"
+        },
+        "detailsSaveFailed": "Details could not be saved. Token and cost totals may be incomplete.",
+        "httpStatus": "The provider returned HTTP {{status}}.",
+        "derived": "derived",
+        "rateSource": "Price source",
+        "rateVerified": "Price verified",
+        "error": {
+          "rateLimit": {
+            "title": "Provider rate limit",
+            "reason": "The provider rate limit was reached.",
+            "next": "Wait before trying again; check provider limits if it persists."
+          },
+          "authentication": {
+            "title": "API key rejected",
+            "reason": "The provider rejected the API key.",
+            "next": "Check the key in Post Process settings."
+          },
+          "quota": {
+            "title": "Provider quota",
+            "reason": "The provider reported insufficient quota.",
+            "next": "Check your provider account limits."
+          },
+          "timeout": {
+            "title": "Request timed out",
+            "reason": "No complete response arrived within 60 seconds.",
+            "next": "Check connectivity and provider status. A timed-out call may still be billed."
+          },
+          "invalidResponse": {
+            "title": "Invalid response",
+            "reason": "The response did not contain a valid rewrite.",
+            "next": "Check model support for the selected format."
+          },
+          "missingModel": {
+            "title": "Missing model",
+            "reason": "Select a post-processing model to run this profile.",
+            "next": "Choose a model in Post Process settings."
+          },
+          "inputChanged": {
+            "title": "Input changed",
+            "reason": "The target input changed while processing, so the rewrite was not inserted.",
+            "next": "Review the saved rewrite and start a new recording."
+          },
+          "inputRecheck": {
+            "title": "Input could not be rechecked",
+            "reason": "Handy could not verify the input before insertion.",
+            "next": "Review the saved rewrite and try again."
+          },
+          "httpError": {
+            "title": "Provider request failed",
+            "reason": "The provider returned an error response.",
+            "next": "Check the provider settings and try again later."
+          },
+          "providerUnavailable": {
+            "title": "Provider unavailable",
+            "reason": "The provider is temporarily unavailable.",
+            "next": "Try again later."
+          },
+          "transportError": {
+            "title": "Connection failed",
+            "reason": "Handy could not complete the provider request.",
+            "next": "Check your connection and provider endpoint."
+          },
+          "generic": {
+            "title": "Post-process failed",
+            "reason": "The rewrite could not be completed.",
+            "next": "Check Post Process settings and try a new recording."
+          }
+        }
+      },
       "title": "Geschiedenis",
       "openFolder": "Opnamemap openen",
       "loading": "Geschiedenis laden...",
@@ -702,7 +891,14 @@
   },
   "overlay": {
     "transcribing": "Transcriberen...",
-    "processing": "Verwerken..."
+    "processing": "Verwerken...",
+    "profileContext": "{{name}}: {{mode}}",
+    "inputMode": {
+      "compose": "New instruction",
+      "edit": "Edit selection",
+      "unknown": "Selection unavailable",
+      "protected": "Protected field"
+    }
   },
   "secureInput": {
     "blockedWithCulprit_one": "{{name}} blokkeert mogelijk 1 sneltoets",
@@ -714,5 +910,81 @@
     "learnMore": "Hoe je dit oplost",
     "recorderBlocked": "Sneltoetsen kunnen nu niet worden opgenomen — Secure Input van macOS blokkeert toetsgebeurtenissen. Los eerst de Secure Input-waarschuwing op.",
     "dismiss": "Sluiten"
+  },
+  "profiles": {
+    "title": "Profiles",
+    "selector": "Context profiles",
+    "tabs": "Profile settings",
+    "tab": {
+      "context": "Context selection",
+      "dictionary": "Long-term dictionary",
+      "memory": "Short-term memory"
+    },
+    "description": "Choose how this profile is recognized and what it remembers.",
+    "fallback": "Fallback",
+    "add": "+ Add profile",
+    "newProfile": "New profile",
+    "loading": "Loading profiles...",
+    "routing": "Routing signals",
+    "name": "Profile name",
+    "icon": "Profile icon",
+    "icons": {
+      "generic": "General",
+      "terminal": "Terminal",
+      "code": "Code",
+      "mail": "Mail",
+      "chrome": "Chrome",
+      "firefox": "Firefox",
+      "vscode": "VS Code",
+      "intellij": "IntelliJ IDEA",
+      "claude": "Claude Code",
+      "codex": "Codex",
+      "pi": "Pi",
+      "opencode": "OpenCode",
+      "github": "GitHub",
+      "slack": "Slack",
+      "notes": "Notes",
+      "custom": "Custom"
+    },
+    "generalRouting": "General is used when no application rule matches, or when rules are ambiguous.",
+    "application": "Application executable",
+    "applicationHint": "Match the app focused when recording starts, for example WindowsTerminal.exe. Workspace matching is not available yet.",
+    "addApplication": "Add application",
+    "saveProfile": "Save profile",
+    "delete": "Delete profile",
+    "deleteConfirm": "Delete this profile and its dictionary and memory?",
+    "systemPrompt": "System prompt",
+    "defaultPrompt": "General default. Profiles without a custom prompt inherit this template.",
+    "inheritedPrompt": "Inherited from General. Changes to General apply to the next recording.",
+    "customPrompt": "Custom prompt for this profile.",
+    "variables": "Insert variable",
+    "variablesHint": "Variables refer to the named data fields in the request. All four fields are always included. Helpers and unknown variables are rejected.",
+    "savePrompt": "Save prompt",
+    "cancel": "Cancel",
+    "customize": "Customize",
+    "editPrompt": "Edit prompt",
+    "resetPrompt": "Use General prompt",
+    "dictionaryHint": "Canonical keyword on the left; observed misheard forms on the right, one per line. Forms must map to only one keyword in this profile.",
+    "dictionaryEmpty": "No keywords yet.",
+    "canonical": "Canonical keyword",
+    "misheard": "Misheard forms",
+    "removeKeyword": "Remove keyword",
+    "addKeyword": "Add keyword",
+    "saveDictionary": "Save dictionary",
+    "memoryHint": "Accepted conversation corrections for this profile. Memory lasts until Handy exits.",
+    "memoryEmpty": "No short-term memory yet.",
+    "remove": "Remove",
+    "clearMemory": "Clear memory",
+    "reload": "Reload profiles",
+    "requestFailed": "The request failed. Your draft is still here.",
+    "enable": "Enable context profiles",
+    "enableDescription": "Create profiles and dictionaries before choosing a model. When you use post-processing, the selected endpoint receives your profile context and transcript.",
+    "savingSetting": "Saving profile setting...",
+    "importIcon": "Import PNG or ICO…",
+    "importIconFailed": "Could not import icon.",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "unsaved": "Unsaved changes",
+    "savePromptAndClose": "Save and close"
   }
 }

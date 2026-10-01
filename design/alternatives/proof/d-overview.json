@@ -1,0 +1,29 @@
+{
+  "checkedAt": "2026-09-27T08:16:38.942Z",
+  "browser": "Installed Microsoft Edge",
+  "desktop": {
+    "title": "D · Handy architecture at a glance",
+    "overflow": false,
+    "selects": 0,
+    "brokenAnchors": [],
+    "imagesLoaded": true,
+    "headings": [
+      "Two paths meet at the request",
+      "Instructions and data travel together",
+      "Check, dispatch, release",
+      "Five interruptions, five visible consequences",
+      "What should count as completed output before learning?",
+      "Code evidence"
+    ]
+  },
+  "mobileOverflow": false,
+  "errors": [],
+  "external": [],
+  "visibleCasesWithoutJavaScript": {
+    "cancellation": true,
+    "focus": true,
+    "field": true,
+    "invalidReply": true,
+    "protectedInput": true
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "title": "Round 2 · Architecture, purpose and evidence",
+  "desktopOverflow": false,
+  "missingAnchors": [],
+  "imagesLoaded": true,
+  "selects": 0,
+  "headings": [
+    "Explain each handoff",
+    "Compare two operations",
+    "Explain the boundaries",
+    "Keep the overview and the real app",
+    "Evaluate the explanation",
+    "Portable instructions, separate from the example"
+  ],
+  "missingLocalLinks": [],
+  "mobileOverflow": false,
+  "externalRequests": [],
+  "javascript": "disabled; core reading inspected without scripts",
+  "checkedAt": "2026-09-27T08:52:24.091Z"
+}

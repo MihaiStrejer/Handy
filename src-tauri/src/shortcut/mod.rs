@@ -1001,8 +1001,12 @@ pub fn change_auto_submit_key_setting(app: AppHandle, key: String) -> Result<(),
 #[tauri::command]
 #[specta::specta]
 pub fn change_post_process_enabled_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let _profile_lock = crate::context_profiles::storage::PROFILE_WRITES
+        .lock()
+        .map_err(|_| "Profile store lock poisoned")?;
     let mut settings = settings::get_settings(&app);
     settings.post_process_enabled = enabled;
+    settings::normalize_profile_flag(&mut settings);
     settings::write_settings(&app, settings.clone());
 
     // Register or unregister the post-processing shortcut
