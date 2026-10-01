@@ -1,0 +1,9 @@
+{
+  "checked_at": "2026-09-27T08:47:59.023Z",
+  "import_and_save": "passed",
+  "source_deleted": true,
+  "selector_and_picker": "rendered saved image",
+  "overlay": "rendered image from session-event fixture; no voice recording",
+  "builtin_count": 15,
+  "settings_restored": "test profile removed in cleanup"
+}

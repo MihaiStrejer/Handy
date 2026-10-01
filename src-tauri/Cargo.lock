@@ -2504,6 +2504,7 @@ name = "handy"
 version = "0.9.7"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "cpal",
@@ -2518,6 +2519,7 @@ dependencies = [
  "handy-keys",
  "hf-hub",
  "hound",
+ "image",
  "isolang",
  "libc",
  "log",

@@ -1,0 +1,28 @@
+{
+  "checkedAt": "2026-09-27T08:14:53.431Z",
+  "browser": "Installed Microsoft Edge",
+  "desktop": {
+    "title": "Handy · B / The session storyboard",
+    "overflow": false,
+    "selects": 0,
+    "brokenAnchors": [],
+    "imagesLoaded": true,
+    "headings": [
+      "One session, six visible frames",
+      "Frame 03, opened up",
+      "Five changes to that same story",
+      "When can a correction become learning?",
+      "What this page proves"
+    ]
+  },
+  "mobileOverflow": false,
+  "errors": [],
+  "external": [],
+  "visibleCasesWithoutJavaScript": {
+    "cancellation": true,
+    "focus": true,
+    "field": true,
+    "invalidReply": true,
+    "protectedInput": true
+  }
+}

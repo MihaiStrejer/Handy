@@ -1,0 +1,23 @@
+{
+  "checked_at": "2026-09-27T10:08:59.817Z",
+  "layout": "B",
+  "failure_cases": [
+    "rate_limit",
+    "auth",
+    "timeout",
+    "invalid",
+    "setup"
+  ],
+  "checks": [
+    "status beside timestamp",
+    "reason inside metadata section",
+    "reason visible with inspector closed",
+    "failure explanation and next step",
+    "no request for setup failure",
+    "request and call tabs",
+    "Escape restores focus",
+    "gallery navigation",
+    "680px dark/light overflow",
+    "no page errors"
+  ]
+}

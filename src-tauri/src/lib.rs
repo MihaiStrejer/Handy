@@ -8,6 +8,7 @@ mod catalog;
 pub mod cli;
 mod clipboard;
 mod commands;
+mod context_profiles;
 mod helpers;
 mod input;
 mod llm_client;
@@ -217,6 +218,16 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     app_handle.manage(model_manager.clone());
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
+    app_handle.manage(context_profiles::SessionStore::default());
+    app_handle.manage(context_profiles::CaptureService::default());
+    app_handle.manage(context_profiles::storage::ProfileMemory::default());
+    app_handle.manage(context_profiles::storage::ProfileCache::default());
+    app_handle.manage(context_profiles::request::EndpointCompatibility::default());
+    if settings::get_settings(app_handle).post_process_profiles {
+        if let Err(error) = context_profiles::storage::get_context_profiles(app_handle.clone()) {
+            log::warn!("Could not load context profiles: {error}");
+        }
+    }
     app_handle.manage(tray::TrayState::new());
 
     // Note: Shortcuts are NOT initialized here.
@@ -676,6 +687,13 @@ pub fn run(cli_args: CliArgs) {
             shortcut::change_auto_submit_setting,
             shortcut::change_auto_submit_key_setting,
             shortcut::change_post_process_enabled_setting,
+            context_profiles::storage::change_post_process_profiles_setting,
+            context_profiles::storage::get_context_profiles,
+            context_profiles::icons::import_profile_icon,
+            context_profiles::storage::save_context_profile,
+            context_profiles::storage::delete_context_profile,
+            context_profiles::storage::get_profile_memory,
+            context_profiles::storage::remove_profile_memory,
             shortcut::change_experimental_enabled_setting,
             shortcut::change_post_process_base_url_setting,
             shortcut::change_post_process_api_key_setting,
@@ -757,6 +775,11 @@ pub fn run(cli_args: CliArgs) {
             commands::transcription::get_model_load_status,
             commands::transcription::unload_model_manually,
             commands::history::get_history_entries,
+            commands::history::get_history_processing_runs,
+            commands::history::get_history_processing_run,
+            commands::history::get_history_request_contents,
+            commands::history::clear_history_request_contents,
+            commands::history::set_history_request_contents_enabled,
             commands::history::toggle_history_entry_saved,
             commands::history::get_audio_file_path,
             commands::history::delete_history_entry,
@@ -766,6 +789,7 @@ pub fn run(cli_args: CliArgs) {
             helpers::clamshell::is_laptop,
         ])
         .events(collect_events![
+            context_profiles::SessionDisplay,
             managers::history::HistoryUpdatePayload,
             managers::transcription::StreamTextEvent,
             managers::transcription::StreamPhaseEvent,

@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Handy context profiles mockup</title>
+  <style>
+    :root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #222020; background: #fbfbfb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 620px; }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .app { display: grid; grid-template-columns: 160px 224px minmax(0, 1fr); min-height: 100vh; }
+    .global { border-right: 1px solid #dfdadd; padding: 22px 8px; }
+    .logo { color: #382731; font-size: 27px; font-weight: 750; letter-spacing: -.055em; padding: 0 15px 22px; }
+    .logo span { color: #da5893; }
+    .global nav { border-top: 1px solid #e6e1e3; padding-top: 14px; }
+    .global .item { width: 100%; border: 0; background: transparent; color: #555056; text-align: left; border-radius: 9px; padding: 11px 13px; margin: 2px 0; display: flex; gap: 10px; align-items: center; }
+    .global .item.active { background: #efb3cd; color: #291a22; font-weight: 650; }
+    .glyph { width: 19px; text-align: center; font-size: 17px; }
+    .profiles { background: #f6f3f5; border-right: 1px solid #dfdadd; padding: 26px 13px; overflow: hidden; }
+    .eyebrow { color: #747076; font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+    .profiles h1 { font-size: 19px; line-height: 1.2; margin: 8px 5px 21px; }
+    .profiles .eyebrow { margin-left: 5px; }
+    .profile-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; }
+    .profile { display: flex; align-items: center; gap: 9px; width: 100%; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; padding: 11px 9px; color: #3f3b3e; }
+    .profile.active { background: white; border-color: #e1d7db; box-shadow: 0 1px 3px #2d18210a; }
+    .profile .mini { width: 25px; height: 25px; background: #eee5e9; border-radius: 6px; display: grid; place-items: center; font-size: 13px; flex: none; }
+    .profile.active .mini { background: #f7d9e6; }
+    .profile .name { display: block; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+    .profile .sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #817b80; font-size: 11px; font-weight: 400; margin-top: 2px; }
+    .add { display: block; width: 100%; margin-top: 13px; border: 1px dashed #c9b7c1; background: transparent; border-radius: 9px; color: #7d3656; padding: 10px; text-align: left; font-size: 12px; font-weight: 650; }
+    .new-form { margin-top: 10px; display: none; gap: 6px; }
+    .new-form.show { display: grid; }
+    .new-form input { width: 100%; border: 1px solid #ccc4c8; border-radius: 7px; padding: 8px; background: white; font-size: 12px; }
+    .new-form button { border: 0; border-radius: 7px; background: #da5893; color: white; padding: 8px; font-size: 12px; }
+    .inline-form { display: none; gap: 9px; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; margin: 10px 0; padding: 13px; border: 1px solid #e4dfe2; border-radius: 10px; background: #fff; }
+    .inline-form.show { display: grid; }
+    .inline-form.two { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; }
+    .inline-form label { color: #6f686d; font-size: 11px; }
+    .inline-form input { display: block; width: 100%; margin-top: 4px; border: 1px solid #ccc4c8; border-radius: 7px; padding: 7px 8px; font-size: 12px; }
+    .inline-form button { border: 0; border-radius: 7px; padding: 8px 10px; background: #da5893; color: #fff; font-size: 12px; }
+    .content { padding: 28px 36px 55px; max-width: 940px; width: 100%; }
+    .crumb { color: #8a8589; font-size: 12px; }
+    h2 { font-size: 25px; font-weight: 650; letter-spacing: -.035em; margin: 7px 0 4px; }
+    .subtitle { color: #757076; font-size: 13px; margin: 0 0 23px; }
+    .tabs { display: flex; border-bottom: 1px solid #dcd6d9; gap: 21px; margin-bottom: 25px; }
+    .tab { color: #777278; padding: 10px 0 11px; border: 0; border-bottom: 2px solid transparent; background: transparent; font-size: 13px; white-space: nowrap; }
+    .tab.active { color: #823754; border-color: #da5893; font-weight: 650; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .section-title { color: #757076; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin: 24px 2px 9px; }
+    .section-title:first-child { margin-top: 0; }
+    .card { background: #fff; border: 1px solid #e4dfe2; border-radius: 10px; overflow: hidden; }
+    .row { display: flex; gap: 15px; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #eee9ec; }
+    .row:last-child { border-bottom: 0; }
+    .row strong { font-size: 13px; font-weight: 650; }
+    .row small { display: block; color: #797479; font-size: 12px; margin-top: 3px; line-height: 1.4; }
+    .value { font-size: 12px; color: #484146; background: #f7f4f5; padding: 7px 10px; border-radius: 7px; white-space: nowrap; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+    .value.good { color: #2d6c56; background: #eaf5ee; }
+    .value.warn { color: #946800; background: #fff4d8; }
+    .soft-button { border: 1px solid #d8cbd1; background: #fff; color: #753650; padding: 8px 11px; border-radius: 8px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+    .primary-button { border: 0; background: #da5893; color: white; padding: 9px 13px; border-radius: 8px; font-size: 12px; font-weight: 650; }
+    .hint { color: #777177; font-size: 12px; line-height: 1.5; margin: 10px 2px 0; }
+    .prompt-card { background: #fff; border: 1px solid #e4dfe2; border-radius: 10px; padding: 14px 16px; }
+    .prompt-state { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; font-size: 12px; }
+    .prompt-state strong { color: #78344f; background: #f9e9f0; border-radius: 6px; padding: 5px 7px; }
+    .prompt-state span { color: #777177; }
+    .prompt-card textarea { display: block; width: 100%; min-height: 126px; resize: vertical; border: 1px solid #d8ced3; border-radius: 7px; padding: 10px; color: #342d31; background: #fff; font-size: 12px; line-height: 1.5; }
+    .prompt-card textarea[readonly] { background: #fbfafb; }
+    .prompt-card textarea:focus-visible { outline: 2px solid #b04472; outline-offset: 1px; }
+    .prompt-variables { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+    .prompt-variables span { color: #777177; font-size: 11px; margin-right: 3px; }
+    .prompt-variables button { border: 1px solid #e4d7dd; background: #faf6f8; color: #79405b; border-radius: 6px; padding: 4px 6px; font: 11px Consolas, monospace; }
+    .prompt-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+    .prompt-actions[hidden] { display: none; }
+    .prompt-feedback { color: #a63248; font-size: 11px; margin: 8px 0 0; }
+    .prompt-feedback:empty { display: none; }
+    .prompt-reset { margin-top: 9px; padding: 0; border: 0; background: transparent; color: #803d59; font-size: 12px; }
+    .prompt-reset[hidden] { display: none; }
+    .entry-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .entry-head p { margin: 3px 0 0; color: #777177; font-size: 12px; }
+    .entry { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr) auto; align-items: start; gap: 12px; padding: 14px 17px; border-bottom: 1px solid #eee9ec; font-size: 13px; }
+    .entry:last-child { border: 0; }
+    .entry b { font-weight: 650; }
+    .forms { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+    .form-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 6px; background: #f7f2f5; color: #68535e; padding: 4px 6px; overflow-wrap: anywhere; }
+    .form-chip button { padding: 0 2px; }
+    .entry .empty-form { color: #817b80; font-size: 11px; }
+    .entry-actions { display: flex; gap: 7px; justify-content: end; }
+    .entry button { color: #7e3b58; background: transparent; border: 0; font-size: 12px; }
+    .memory { padding: 15px 17px; border-bottom: 1px solid #eee9ec; }
+    .memory:last-child { border: 0; }
+    .memory .top { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .memory .top b { font-size: 13px; }
+    .memory p { font-size: 12px; color: #625c61; margin: 7px 0 9px; }
+    .memory .meta { font-size: 11px; color: #817a7f; }
+    .memory .meta em { color: #2d6c56; font-style: normal; font-weight: 650; }
+    .memory button { border: 0; background: transparent; color: #8a3759; font-size: 12px; }
+    .note { margin-top: 18px; border-left: 3px solid #da5893; background: #fcf3f7; padding: 11px 14px; color: #654d58; font-size: 12px; line-height: 1.5; }
+    @media (max-width: 1020px) { .app { grid-template-columns: 140px 190px minmax(0, 1fr); } .content { padding: 22px; } }
+    @media (max-width: 750px) {
+      .app { grid-template-columns: 118px 145px minmax(0, 1fr); }
+      .global { padding: 12px 5px; }
+      .logo { font-size: 21px; padding: 0 8px 14px; }
+      .global .item { gap: 5px; padding: 8px 6px; font-size: 12px; }
+      .glyph { width: 15px; font-size: 14px; }
+      .profiles { padding: 17px 7px; }
+      .profiles h1 { font-size: 16px; margin-bottom: 13px; }
+      .profile { gap: 5px; padding: 7px 5px; }
+      .profile .mini { width: 21px; height: 21px; font-size: 11px; }
+      .profile .name { font-size: 11px; }
+      .profile .sub { font-size: 10px; }
+      .add { font-size: 11px; padding: 8px; }
+      .content { padding: 16px 13px 28px; }
+      h2 { font-size: 20px; }
+      .subtitle { font-size: 11px; line-height: 1.3; margin-bottom: 10px; }
+      .tabs { gap: 10px; overflow-x: auto; margin-bottom: 16px; }
+      .tab { font-size: 11.5px; padding: 8px 0; }
+      .section-title { margin-top: 16px; }
+      .row { gap: 7px; padding: 10px; }
+      .row strong { font-size: 12px; }
+      .row small { font-size: 11px; }
+      .value { font-size: 10px; padding: 5px 6px; }
+      .prompt-card { padding: 10px; }
+      .prompt-card textarea { font-size: 11px; min-height: 118px; }
+      .prompt-state { font-size: 11px; }
+      .prompt-variables { gap: 4px; }
+      .prompt-variables button { font-size: 10px; }
+      .entry { grid-template-columns: minmax(60px, .75fr) minmax(0, 1.25fr); font-size: 11px; padding: 9px; gap: 7px; }
+      .entry-actions { grid-column: 1 / -1; }
+      .memory { padding: 10px; }
+      .memory .top b { font-size: 12px; }
+      .memory p, .memory .meta, .note, .hint { font-size: 11px; }
+      .inline-form, .inline-form.two { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="global" aria-label="Handy settings">
+      <div class="logo">handy<span>.</span></div>
+      <nav>
+        <button class="item"><span class="glyph">✦</span> General</button>
+        <button class="item"><span class="glyph">◷</span> History</button>
+        <button class="item"><span class="glyph">▣</span> Models</button>
+        <button class="item"><span class="glyph">⚙</span> Advanced</button>
+        <button class="item"><span class="glyph">✧</span> Post Process</button>
+        <button class="item active"><span class="glyph">◫</span> Profiles</button>
+        <button class="item"><span class="glyph">ⓘ</span> About</button>
+      </nav>
+    </aside>
+    <aside class="profiles" aria-label="Profiles">
+      <div class="eyebrow">Context profiles</div>
+      <h1>Profiles</h1>
+      <div class="profile-list" id="profile-list"></div>
+      <button class="add" id="add-profile">＋ Add profile</button>
+      <form class="new-form" id="new-form"><input id="new-name" aria-label="New profile name" placeholder="Profile name" required><button>Create profile</button></form>
+    </aside>
+    <main class="content">
+      <div class="crumb">Profiles / <span id="crumb-profile">Handy workspace</span></div>
+      <h2 id="profile-title">Handy workspace</h2>
+      <p class="subtitle">Set this profile's routing, prompt, and memory.</p>
+      <div class="tabs" role="tablist" aria-label="Profile settings">
+        <button class="tab active" role="tab" data-tab="context">Context selection</button>
+        <button class="tab" role="tab" data-tab="dictionary">Long-term dictionary</button>
+        <button class="tab" role="tab" data-tab="memory">Short-term memory</button>
+      </div>
+      <section class="panel active" id="context" role="tabpanel">
+        <div class="entry-head"><div><div class="section-title">System prompt</div><p>Set the instructions for this profile's post-processing request.</p></div><button class="soft-button" id="prompt-toggle">Customize prompt</button></div>
+        <div class="prompt-card">
+          <div class="prompt-state"><strong id="prompt-status">Inherited from General</strong><span id="prompt-source">Changes to General update this profile.</span></div>
+          <label for="prompt-text" class="eyebrow">Effective template</label>
+          <textarea id="prompt-text" readonly spellcheck="false" aria-label="Effective system prompt template"></textarea>
+          <p class="prompt-feedback" id="prompt-feedback" role="alert"></p>
+          <div class="prompt-variables"><span>Insert variable:</span><button type="button" data-variable="dictionary">{{dictionary}}</button><button type="button" data-variable="short_term_memory">{{short_term_memory}}</button><button type="button" data-variable="input_context">{{input_context}}</button><button type="button" data-variable="transcript">{{transcript}}</button></div>
+          <div class="prompt-actions" id="prompt-edit-actions" hidden><button class="soft-button" id="prompt-cancel">Cancel</button><button class="primary-button" id="prompt-save">Save prompt</button></div>
+          <button class="prompt-reset" id="prompt-reset" hidden>Use General prompt instead</button>
+        </div>
+        <p class="hint">The selected provider stays in Post Process. This template is resolved with the session's profile, dictionary, and captured input.</p>
+        <div class="entry-head"><div class="section-title">Routing signals</div><button class="soft-button" id="edit-routing">Edit routing</button></div>
+        <div class="card">
+          <div class="row"><div><strong>Application</strong><small>Start with the focused app when recording begins.</small></div><span class="value" id="app-value">Terminal</span></div>
+          <div class="row"><div><strong>Workspace directory</strong><small>Use only when the focused terminal session can be verified.</small></div><span class="value" id="workspace-value">D:\rust\Handy</span></div>
+        </div>
+        <form class="inline-form two" id="routing-form"><label>Application<input id="route-app" required></label><label>Workspace<input id="route-workspace" placeholder="Not used"></label><button>Save</button></form>
+      </section>
+      <section class="panel" id="dictionary" role="tabpanel">
+        <div class="entry-head"><div><div class="section-title">Keywords and misheard forms</div><p>Each keyword owns the phrases recognition has mistaken for it.</p></div><button class="primary-button" id="add-entry">＋ Add keyword</button></div>
+        <form class="inline-form two" id="entry-form"><label>Keyword<input id="entry-keyword" required></label><label>Misheard as<input id="entry-form-value" placeholder="Optional for a new keyword"></label><button id="entry-submit">Save keyword</button></form>
+        <div class="section-title">Dictionary source</div>
+        <div class="card"><div class="row"><div><strong>Local dictionary</strong><small>Validated misunderstandings can add forms under existing keywords.</small></div><span class="value good">Available</span></div></div>
+        <div class="section-title">Keyword → misheard as</div>
+        <div class="card" id="entries"></div>
+        <p class="hint">A validated keyword misunderstanding adds a new phrase on the right. This dictionary is separate from ASR custom words.</p>
+      </section>
+      <section class="panel" id="memory" role="tabpanel">
+        <div class="entry-head"><div><div class="section-title">Recent corrections</div><p>Accepted corrections are sent with this profile's next request.</p></div><button class="soft-button" id="clear-memory">Clear memory</button></div>
+        <div class="card" id="memories"></div>
+        <div class="note">Conversation-specific corrections go here. A validated repeatable keyword misunderstanding extends that keyword's list in the long-term dictionary. Duration and size limits remain design decisions.</div>
+      </section>
+    </main>
+  </div>
+  <script>
+    const profiles = [
+      {name: 'General', detail: 'Fallback', icon: '◫', app: 'Any app', workspace: 'Not used', prompt: 'Rewrite the voice transcript for the current input.\nUse {{dictionary}} for exact names and {{short_term_memory}} for recent corrections.\nUse {{input_context}} to preserve the surrounding meaning.\nReturn the text and the action taken.', entries: [['Handy', ['handy app']]], memories: []},
+      {name: 'Handy workspace', detail: 'Terminal · D:\\rust\\Handy', icon: '▣', app: 'Terminal', workspace: 'D:\\rust\\Handy', prompt: null, entries: [['Codex', ['codecks', 'code X']], ['Handy', ['handy project']], ['Claude Code', ['cloud code']]], memories: [
+        ['Use “project brief” for this document', 'The last edit replaced “project plan” with “project brief”.'],
+        ['Current meeting date: Thursday', 'The user corrected Friday to Thursday in the last voice turn.']
+      ]},
+      {name: 'Work email', detail: 'Mail application', icon: '✉', app: 'Mail', workspace: 'Not used', prompt: 'Turn {{transcript}} into a concise work email.\nUse {{dictionary}} for names and {{input_context}} for the selected passage or caret position.\nReturn the text and the action taken.', entries: [['Acme Co.', ['acme company']]], memories: []}
+    ];
+    const requestedProfile = new URLSearchParams(location.search).get('profile');
+    let activeProfile = ({general: 0, handy: 1, email: 2})[requestedProfile] ?? 1;
+    let promptEditing = false;
+    const list = document.getElementById('profile-list');
+    function renderPrompt() {
+      const profile = profiles[activeProfile];
+      const isGeneral = activeProfile === 0;
+      const inherited = !isGeneral && profile.prompt === null;
+      promptEditing = false;
+      document.getElementById('prompt-status').textContent = isGeneral ? 'General default' : inherited ? 'Inherited from General' : 'Custom prompt';
+      document.getElementById('prompt-source').textContent = isGeneral ? 'Used by every profile without an override.' : inherited ? 'Changes to General update this profile automatically.' : 'Only this profile uses this override.';
+      const editor = document.getElementById('prompt-text');
+      editor.value = inherited ? profiles[0].prompt : profile.prompt;
+      editor.readOnly = true;
+      document.getElementById('prompt-toggle').textContent = isGeneral ? 'Edit default' : inherited ? 'Customize prompt' : 'Edit prompt';
+      document.getElementById('prompt-toggle').hidden = false;
+      document.getElementById('prompt-edit-actions').hidden = true;
+      document.getElementById('prompt-reset').hidden = isGeneral || inherited;
+      document.getElementById('prompt-feedback').textContent = '';
+    }
+    function startPromptEdit() {
+      if (promptEditing) return;
+      promptEditing = true;
+      document.getElementById('prompt-text').readOnly = false;
+      document.getElementById('prompt-toggle').hidden = true;
+      document.getElementById('prompt-reset').hidden = true;
+      document.getElementById('prompt-edit-actions').hidden = false;
+      document.getElementById('prompt-text').focus();
+    }
+    function renderProfiles() {
+      list.innerHTML = '';
+      profiles.forEach((profile, index) => {
+        const button = document.createElement('button');
+        button.className = 'profile' + (index === activeProfile ? ' active' : '');
+        button.innerHTML = '<span class="mini"></span><span class="name"><span class="label"></span><span class="sub"></span></span>';
+        button.querySelector('.mini').textContent = profile.icon;
+        button.querySelector('.label').textContent = profile.name;
+        button.querySelector('.sub').textContent = profile.detail;
+        button.onclick = () => { activeProfile = index; renderProfiles(); renderDetail(); };
+        list.appendChild(button);
+      });
+    }
+    function renderDetail() {
+      const profile = profiles[activeProfile];
+      document.getElementById('routing-form').classList.remove('show');
+      document.getElementById('entry-form').classList.remove('show');
+      document.getElementById('profile-title').textContent = profile.name;
+      document.getElementById('crumb-profile').textContent = profile.name;
+      document.getElementById('app-value').textContent = profile.app;
+      document.getElementById('workspace-value').textContent = profile.workspace;
+      renderPrompt();
+      const entries = document.getElementById('entries'); entries.innerHTML = '';
+      profile.entries.forEach(([keyword, misheardForms], index) => {
+        const row = document.createElement('div'); row.className = 'entry';
+        const key = document.createElement('b'); key.textContent = keyword;
+        const forms = document.createElement('div'); forms.className = 'forms';
+        misheardForms.forEach((phrase, phraseIndex) => {
+          const chip = document.createElement('span'); chip.className = 'form-chip';
+          const label = document.createElement('span'); label.textContent = phrase;
+          const removeForm = document.createElement('button'); removeForm.type = 'button'; removeForm.textContent = '×'; removeForm.setAttribute('aria-label', 'Remove ' + phrase + ' from ' + keyword);
+          removeForm.onclick = () => { misheardForms.splice(phraseIndex, 1); renderDetail(); };
+          chip.append(label, removeForm); forms.appendChild(chip);
+        });
+        if (!misheardForms.length) { const empty = document.createElement('span'); empty.className = 'empty-form'; empty.textContent = 'No misheard forms yet'; forms.appendChild(empty); }
+        const actions = document.createElement('div'); actions.className = 'entry-actions';
+        const addForm = document.createElement('button'); addForm.textContent = '+ Misheard form';
+        addForm.onclick = () => {
+          addingFormTo = index;
+          const form = document.getElementById('entry-form'); form.reset(); form.classList.add('show');
+          document.getElementById('entry-keyword').value = keyword;
+          document.getElementById('entry-keyword').readOnly = true;
+          document.getElementById('entry-form-value').required = true;
+          document.getElementById('entry-submit').textContent = 'Add form';
+          document.getElementById('entry-form-value').focus();
+        };
+        const remove = document.createElement('button'); remove.textContent = 'Remove keyword'; remove.onclick = () => { profile.entries.splice(index, 1); renderDetail(); };
+        actions.append(addForm, remove); row.append(key, forms, actions); entries.appendChild(row);
+      });
+      if (!profile.entries.length) entries.innerHTML = '<div class="row"><small>No stable entries for this profile.</small></div>';
+      const memories = document.getElementById('memories'); memories.innerHTML = '';
+      profile.memories.forEach(([title, description], index) => {
+        const row = document.createElement('div'); row.className = 'memory';
+        const top = document.createElement('div'); top.className = 'top';
+        const heading = document.createElement('b'); heading.textContent = title;
+        const remove = document.createElement('button'); remove.textContent = 'Remove';
+        remove.onclick = () => { profile.memories.splice(index, 1); renderDetail(); };
+        top.append(heading, remove);
+        const body = document.createElement('p'); body.textContent = description;
+        const meta = document.createElement('div'); meta.className = 'meta'; meta.innerHTML = '<em>Included on next request</em> · From a completed edit · This profile only';
+        row.append(top, body, meta); memories.appendChild(row);
+      });
+      if (!profile.memories.length) memories.innerHTML = '<div class="row"><small>No short-term memory for this profile.</small></div>';
+    }
+    renderProfiles(); renderDetail();
+    const tabs = [...document.querySelectorAll('.tab')];
+    function showTab(name) {
+      tabs.forEach(tab => { tab.classList.toggle('active', tab.dataset.tab === name); tab.setAttribute('aria-selected', String(tab.dataset.tab === name)); });
+      document.querySelectorAll('.panel').forEach(panel => panel.classList.toggle('active', panel.id === name));
+    }
+    tabs.forEach(tab => tab.onclick = () => showTab(tab.dataset.tab));
+    const requestedTab = new URLSearchParams(location.search).get('tab');
+    if (['context', 'dictionary', 'memory'].includes(requestedTab)) showTab(requestedTab);
+    document.getElementById('prompt-toggle').onclick = startPromptEdit;
+    document.getElementById('prompt-cancel').onclick = () => { renderPrompt(); document.getElementById('prompt-toggle').focus(); };
+    document.getElementById('prompt-reset').onclick = () => { profiles[activeProfile].prompt = null; renderPrompt(); document.getElementById('prompt-toggle').focus(); };
+    document.getElementById('prompt-text').oninput = () => document.getElementById('prompt-feedback').textContent = '';
+    document.getElementById('prompt-save').onclick = () => {
+      const value = document.getElementById('prompt-text').value.trim();
+      const variables = [...value.matchAll(/{{\s*([^{}]+?)\s*}}/g)].map(match => match[1]);
+      const allowed = new Set(['dictionary', 'short_term_memory', 'input_context', 'transcript']);
+      const unpaired = /{{|}}/.test(value.replace(/{{\s*([^{}]+?)\s*}}/g, ''));
+      const error = !value ? 'Enter a system prompt before saving.' : unpaired || variables.some(name => !allowed.has(name)) ? 'Use only the variables listed below the prompt.' : '';
+      if (error) { document.getElementById('prompt-feedback').textContent = error; return; }
+      profiles[activeProfile].prompt = value;
+      renderPrompt();
+      document.getElementById('prompt-toggle').focus();
+    };
+    document.querySelectorAll('[data-variable]').forEach(button => button.onclick = () => {
+      startPromptEdit();
+      const editor = document.getElementById('prompt-text');
+      const token = '{{' + button.dataset.variable + '}}';
+      const start = editor.selectionStart; const end = editor.selectionEnd;
+      editor.value = editor.value.slice(0, start) + token + editor.value.slice(end);
+      editor.setSelectionRange(start + token.length, start + token.length);
+      editor.focus();
+    });
+    document.getElementById('add-profile').onclick = () => document.getElementById('new-form').classList.toggle('show');
+    document.getElementById('new-form').onsubmit = event => {
+      event.preventDefault(); const input = document.getElementById('new-name'); const name = input.value.trim(); if (!name) return;
+      profiles.push({name, detail: 'Draft profile', icon: '◫', app: 'Not configured', workspace: 'Not configured', prompt: null, entries: [], memories: []}); activeProfile = profiles.length - 1; renderProfiles(); renderDetail();
+      input.value = ''; document.getElementById('new-form').classList.remove('show');
+    };
+    document.getElementById('edit-routing').onclick = () => {
+      const profile = profiles[activeProfile];
+      document.getElementById('route-app').value = profile.app;
+      document.getElementById('route-workspace').value = profile.workspace === 'Not used' ? '' : profile.workspace;
+      document.getElementById('routing-form').classList.toggle('show');
+    };
+    document.getElementById('routing-form').onsubmit = event => {
+      event.preventDefault(); const profile = profiles[activeProfile];
+      profile.app = document.getElementById('route-app').value.trim();
+      profile.workspace = document.getElementById('route-workspace').value.trim() || 'Not used';
+      profile.detail = profile.app + (profile.workspace === 'Not used' ? '' : ' · ' + profile.workspace);
+      document.getElementById('routing-form').classList.remove('show'); renderProfiles(); renderDetail();
+    };
+    let addingFormTo = -1;
+    document.getElementById('entry-keyword').oninput = event => event.target.setCustomValidity('');
+    document.getElementById('entry-form-value').oninput = event => event.target.setCustomValidity('');
+    document.getElementById('add-entry').onclick = () => {
+      addingFormTo = -1;
+      const form = document.getElementById('entry-form'); form.reset(); form.classList.add('show');
+      document.getElementById('entry-keyword').readOnly = false;
+      document.getElementById('entry-form-value').required = false;
+      document.getElementById('entry-submit').textContent = 'Save keyword';
+      document.getElementById('entry-keyword').focus();
+    };
+    document.getElementById('entry-form').onsubmit = event => {
+      event.preventDefault(); const profile = profiles[activeProfile];
+      const keyInput = document.getElementById('entry-keyword');
+      const formInput = document.getElementById('entry-form-value');
+      const keyword = keyInput.value.trim(); const phrase = formInput.value.trim();
+      if (addingFormTo < 0) {
+        if (profile.entries.some(([existing]) => existing.toLowerCase() === keyword.toLowerCase())) { keyInput.setCustomValidity('This keyword already exists in this profile.'); keyInput.reportValidity(); return; }
+        if (phrase && profile.entries.some(([, forms]) => forms.some(existing => existing.toLowerCase() === phrase.toLowerCase()))) { formInput.setCustomValidity('This form already belongs to a keyword in this profile.'); formInput.reportValidity(); return; }
+        profile.entries.push([keyword, phrase ? [phrase] : []]);
+      } else {
+        if (profile.entries.some(([, forms]) => forms.some(existing => existing.toLowerCase() === phrase.toLowerCase()))) { formInput.setCustomValidity('This form already belongs to a keyword in this profile.'); formInput.reportValidity(); return; }
+        profile.entries[addingFormTo][1].push(phrase);
+      }
+      document.getElementById('entry-form').classList.remove('show'); renderDetail();
+    };
+    document.getElementById('clear-memory').onclick = () => { profiles[activeProfile].memories = []; renderDetail(); };
+  </script>
+</body>
+</html>

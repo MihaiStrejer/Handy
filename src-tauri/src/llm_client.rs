@@ -1,3 +1,4 @@
+use crate::managers::history_processing::RunGuard;
 use crate::settings::PostProcessProvider;
 use log::{debug, error, info};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, REFERER, USER_AGENT};
@@ -125,6 +126,13 @@ struct ChatCompletionResponse {
     choices: Vec<ChatChoice>,
 }
 
+/// A run is supplied by its caller; this client never selects mutable global history state.
+pub struct CallContext<'a> {
+    pub run: &'a RunGuard,
+    pub purpose: &'a str,
+    pub retry_of: Option<i64>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ChatChoice {
     message: ChatMessageResponse,
@@ -177,6 +185,7 @@ fn create_client(provider: &PostProcessProvider, api_key: &str) -> Result<reqwes
     let headers = build_headers(provider, api_key)?;
     reqwest::Client::builder()
         .default_headers(headers)
+        .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| report_reqwest_error("Failed to build HTTP client", &e))
 }
@@ -335,6 +344,29 @@ pub async fn send_chat_completion_with_schema(
     json_schema: Option<Value>,
     disable_reasoning: bool,
 ) -> Result<Option<String>, String> {
+    send_chat_completion_observed(
+        provider,
+        api_key,
+        model,
+        user_content,
+        system_prompt,
+        json_schema,
+        disable_reasoning,
+        None,
+    )
+    .await
+}
+
+pub async fn send_chat_completion_observed(
+    provider: &PostProcessProvider,
+    api_key: String,
+    model: &str,
+    user_content: String,
+    system_prompt: Option<String>,
+    json_schema: Option<Value>,
+    disable_reasoning: bool,
+    observation: Option<CallContext<'_>>,
+) -> Result<Option<String>, String> {
     let base_url = provider.base_url.trim_end_matches('/');
     let url = format!("{}/chat/completions", base_url);
 
@@ -387,18 +419,22 @@ pub async fn send_chat_completion_with_schema(
         reasoning,
     };
 
-    let mut response = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await
-        .map_err(|e| report_reqwest_error("HTTP request failed", &e))?;
-    let mut status = response.status();
+    let mut previous_call = observation.as_ref().and_then(|context| context.retry_of);
+    let mut response = send_attempt(
+        &client,
+        &url,
+        &request_body,
+        provider,
+        model,
+        observation.as_ref(),
+        &mut previous_call,
+    )
+    .await?;
+    let mut status = response.0;
     debug!(
-        "Chat completion response received with status {} over {:?} from {}",
+        "Chat completion response received with status {} from {}",
         status,
-        response.version(),
-        sanitized_url(response.url())
+        sanitized_url_for_log(&url)
     );
 
     // A 400/422 on a request carrying reasoning-disable fields is almost always
@@ -407,27 +443,27 @@ pub async fn send_chat_completion_with_schema(
         && matches!(status.as_u16(), 400 | 422)
         && !request_body.reasoning.is_empty()
     {
-        let error_text = response.text().await.unwrap_or_else(|e| {
-            report_reqwest_error("Failed to read reasoning rejection response", &e)
-        });
         info!(
-            "Endpoint rejected request with reasoning disabled (status {}): {}. Retrying without reasoning fields",
-            status, error_text
+            "Endpoint rejected request with reasoning disabled (status {}). Retrying without reasoning fields",
+            status
         );
 
         request_body.reasoning = ReasoningParams::default();
-        response = client
-            .post(&url)
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| report_reqwest_error("HTTP retry failed", &e))?;
-        status = response.status();
+        response = send_attempt(
+            &client,
+            &url,
+            &request_body,
+            provider,
+            model,
+            observation.as_ref(),
+            &mut previous_call,
+        )
+        .await?;
+        status = response.0;
         debug!(
-            "Chat completion retry response received with status {} over {:?} from {}",
+            "Chat completion retry response received with status {} from {}",
             status,
-            response.version(),
-            sanitized_url(response.url())
+            sanitized_url_for_log(&url)
         );
 
         if status.is_success() {
@@ -440,25 +476,227 @@ pub async fn send_chat_completion_with_schema(
     }
 
     if !status.is_success() {
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|e| report_reqwest_error("Failed to read API error response", &e));
-        return Err(format!(
-            "API request failed with status {}: {}",
-            status, error_text
-        ));
+        // Endpoints may echo user input in their error bodies.
+        return Err(format!("API request failed with status {}", status));
     }
 
-    let completion: ChatCompletionResponse = response
-        .json()
-        .await
-        .map_err(|e| report_reqwest_error("Failed to parse API response", &e))?;
+    let completion: ChatCompletionResponse = serde_json::from_slice(&response.1)
+        .map_err(|_| "Endpoint returned invalid response JSON".to_string())?;
 
     Ok(completion
         .choices
         .first()
         .and_then(|choice| choice.message.content.clone()))
+}
+
+async fn send_attempt(
+    client: &reqwest::Client,
+    url: &str,
+    body: &ChatCompletionRequest,
+    provider: &PostProcessProvider,
+    model: &str,
+    observation: Option<&CallContext<'_>>,
+    previous_call: &mut Option<i64>,
+) -> Result<(reqwest::StatusCode, Vec<u8>), String> {
+    // The archived string is passed unchanged as the HTTP body. It contains no headers.
+    let body_json =
+        serde_json::to_string(body).map_err(|_| "Could not serialize request".to_string())?;
+    let mut guard = observation.and_then(|context| {
+        match context.run.start_call(
+            context.purpose,
+            *previous_call,
+            &provider.id,
+            &provider.label,
+            url,
+            model,
+            &body_json,
+        ) {
+            Ok(guard) => Some(guard),
+            Err(error) => {
+                error!("Details could not be saved: {error}");
+                context.run.mark_incomplete();
+                None
+            }
+        }
+    });
+    if let Some(ref guard) = guard {
+        *previous_call = Some(guard.id());
+    }
+    let response = match client.post(url).body(body_json).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            if let Some(ref mut guard) = guard {
+                let code = if error.is_timeout() {
+                    "timeout"
+                } else {
+                    "transport_error"
+                };
+                if let Err(error) = guard.finish("failed", None, None, None, None, Some(code)) {
+                    error!("Details could not be saved: {error}");
+                    if let Some(context) = observation {
+                        context.run.mark_incomplete();
+                    }
+                }
+            }
+            return Err(report_reqwest_error("HTTP request failed", &error));
+        }
+    };
+    let status = response.status();
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 128
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        })
+        .map(str::to_owned);
+    let body_bytes = match response.bytes().await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            if let Some(ref mut guard) = guard {
+                let code = if error.is_timeout() {
+                    "timeout"
+                } else {
+                    "body_error"
+                };
+                if let Err(error) = guard.finish(
+                    "failed",
+                    Some(status.as_u16()),
+                    None,
+                    request_id.as_deref(),
+                    None,
+                    Some(code),
+                ) {
+                    error!("Details could not be saved: {error}");
+                    if let Some(context) = observation {
+                        context.run.mark_incomplete();
+                    }
+                }
+            }
+            return Err(report_reqwest_error("Failed to read API response", &error));
+        }
+    };
+    let metadata: Option<Value> = if body_bytes.len() <= 2 * 1024 * 1024 {
+        serde_json::from_slice(&body_bytes).ok()
+    } else {
+        None
+    };
+    let parsed: Option<ChatCompletionResponse> = if status.is_success() {
+        serde_json::from_slice(&body_bytes).ok()
+    } else {
+        None
+    };
+    let reported_model = metadata
+        .as_ref()
+        .and_then(|value| value.get("model"))
+        .and_then(Value::as_str)
+        .filter(|model| model.len() <= 256);
+    let usage_json = metadata
+        .as_ref()
+        .and_then(|value| value.get("usage"))
+        .and_then(|usage| {
+            normalize_usage(
+                usage,
+                metadata
+                    .as_ref()
+                    .and_then(|value| value.get("service_tier"))
+                    .and_then(Value::as_str),
+            )
+        });
+    let error_code = if status.is_success() {
+        if parsed.is_none() {
+            Some("invalid_response")
+        } else {
+            None
+        }
+    } else {
+        Some(classify_error(status, &body_bytes))
+    };
+    if let Some(ref mut guard) = guard {
+        let outcome = if status.is_success() && parsed.is_some() {
+            "succeeded"
+        } else {
+            "failed"
+        };
+        if let Err(error) = guard.finish(
+            outcome,
+            Some(status.as_u16()),
+            reported_model,
+            request_id.as_deref(),
+            usage_json.as_deref(),
+            error_code,
+        ) {
+            error!("Details could not be saved: {error}");
+            if let Some(context) = observation {
+                context.run.mark_incomplete();
+            }
+        }
+    }
+    Ok((status, body_bytes.to_vec()))
+}
+
+fn classify_error(status: reqwest::StatusCode, bytes: &[u8]) -> &'static str {
+    let code = (bytes.len() <= 16 * 1024)
+        .then(|| serde_json::from_slice::<Value>(bytes).ok())
+        .flatten()
+        .and_then(|value| {
+            value
+                .pointer("/error/code")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+    match (status.as_u16(), code.as_deref()) {
+        (_, Some("invalid_api_key")) => "authentication",
+        (_, Some("insufficient_quota")) => "quota",
+        (_, Some("rate_limit_exceeded" | "rate_limit")) => "rate_limit",
+        (401, _) => "authentication",
+        (500..=599, _) => "provider_unavailable",
+        _ => "http_error",
+    }
+}
+
+fn normalize_usage(raw: &Value, service_tier: Option<&str>) -> Option<String> {
+    let pick = |pointer: &str| raw.pointer(pointer).and_then(Value::as_u64);
+    let mut usage = serde_json::Map::new();
+    for (field, path) in [
+        ("input_tokens", "/prompt_tokens"),
+        ("output_tokens", "/completion_tokens"),
+        ("total_tokens", "/total_tokens"),
+        (
+            "cached_input_tokens",
+            "/prompt_tokens_details/cached_tokens",
+        ),
+        (
+            "cache_write_tokens",
+            "/prompt_tokens_details/cache_write_tokens",
+        ),
+        (
+            "reasoning_tokens",
+            "/completion_tokens_details/reasoning_tokens",
+        ),
+    ] {
+        if let Some(count) = pick(path) {
+            usage.insert(field.into(), Value::from(count));
+        }
+    }
+    if !usage.contains_key("total_tokens") {
+        if let (Some(input), Some(output)) = (pick("/prompt_tokens"), pick("/completion_tokens")) {
+            if let Some(total) = input.checked_add(output) {
+                usage.insert("total_tokens".into(), Value::from(total));
+                usage.insert("total_source".into(), Value::from("derived"));
+            }
+        }
+    } else {
+        usage.insert("total_source".into(), Value::from("reported"));
+    }
+    if let Some(tier) = service_tier.filter(|tier| tier.len() <= 32) {
+        usage.insert("service_tier".into(), Value::from(tier));
+    }
+    (!usage.is_empty()).then(|| Value::Object(usage).to_string())
 }
 
 /// Fetch available models from an OpenAI-compatible API
@@ -730,5 +968,164 @@ mod tests {
         assert!(is_known_rejected(&key));
         // A different model on the same endpoint is tracked separately
         assert!(!is_known_rejected(&endpoint_key(&deepseek, "other-model")));
+    }
+
+    #[test]
+    fn unknown_http_429_does_not_claim_a_rate_limit() {
+        assert_eq!(
+            classify_error(
+                reqwest::StatusCode::TOO_MANY_REQUESTS,
+                br#"{"error":{"message":"PRIVATE"}}"#
+            ),
+            "http_error"
+        );
+        assert_eq!(
+            classify_error(
+                reqwest::StatusCode::TOO_MANY_REQUESTS,
+                br#"{"error":{"code":"rate_limit_exceeded"}}"#
+            ),
+            "rate_limit"
+        );
+        assert_eq!(
+            classify_error(
+                reqwest::StatusCode::FORBIDDEN,
+                br#"{"error":{"code":"insufficient_quota"}}"#
+            ),
+            "quota"
+        );
+    }
+
+    #[test]
+    fn usage_normalization_retains_only_known_numeric_fields() {
+        let raw = serde_json::json!({"prompt_tokens":14860,"completion_tokens":96,"total_tokens":14956,"prompt_tokens_details":{"cached_tokens":14000,"cache_write_tokens":0,"private":"SECRET"},"completion_tokens_details":{"reasoning_tokens":20},"secret":"SECRET"});
+        let value: Value =
+            serde_json::from_str(&normalize_usage(&raw, Some("default")).unwrap()).unwrap();
+        assert_eq!(value["cached_input_tokens"], 14000);
+        assert_eq!(value["cache_write_tokens"], 0);
+        assert_eq!(value["reasoning_tokens"], 20);
+        assert_eq!(value["service_tier"], "default");
+        assert!(!value.to_string().contains("SECRET"));
+    }
+
+    #[tokio::test]
+    async fn retry_archive_matches_each_dispatched_body_and_keeps_reported_usage() {
+        use crate::managers::{
+            history::MIGRATIONS,
+            history_processing::{get_request, get_run, RunGuard, RunSnapshot},
+        };
+        use rusqlite_migration::Migrations;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        Migrations::new(MIGRATIONS.to_vec())
+            .to_latest(&mut conn)
+            .unwrap();
+        conn.execute("INSERT INTO transcription_history (file_name,timestamp,title,transcription_text) VALUES ('test.wav',1,'Test','spoken')", []).unwrap();
+        let run = RunGuard::start(
+            &path,
+            conn.last_insert_rowid(),
+            "spoken",
+            RunSnapshot::default(),
+            true,
+        )
+        .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut bodies = Vec::new();
+            for index in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut received = Vec::new();
+                let boundary = loop {
+                    let mut chunk = [0u8; 4096];
+                    let count = socket.read(&mut chunk).await.unwrap();
+                    assert!(count > 0);
+                    received.extend_from_slice(&chunk[..count]);
+                    if let Some(pos) = received.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                        break pos + 4;
+                    }
+                };
+                let header = String::from_utf8_lossy(&received[..boundary]);
+                let length: usize = header
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse().ok())
+                            .flatten()
+                    })
+                    .unwrap();
+                while received.len() < boundary + length {
+                    let mut chunk = [0u8; 4096];
+                    let count = socket.read(&mut chunk).await.unwrap();
+                    assert!(count > 0);
+                    received.extend_from_slice(&chunk[..count]);
+                }
+                bodies.push(
+                    String::from_utf8(received[boundary..boundary + length].to_vec()).unwrap(),
+                );
+                let (status, body) = if index == 0 {
+                    ("400 Bad Request", r#"{"error":{"message":"PRIVATE ECHO"}}"#)
+                } else {
+                    (
+                        "200 OK",
+                        r#"{"model":"reported-model","choices":[],"usage":{"prompt_tokens":21,"completion_tokens":3,"total_tokens":24}}"#,
+                    )
+                };
+                let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+            let _ = tx.send(bodies);
+        });
+        let result = send_chat_completion_observed(
+            &provider("custom", &base),
+            String::new(),
+            "unique-retry-model",
+            "spoken".into(),
+            Some("instruction".into()),
+            None,
+            true,
+            Some(CallContext {
+                run: &run,
+                purpose: "rewrite",
+                retry_of: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_none());
+        let sent = rx.await.unwrap();
+        let detail = get_run(&path, run.id()).unwrap().unwrap();
+        assert_eq!(detail.calls.len(), 2);
+        assert_eq!(detail.calls[1].retry_of, Some(detail.calls[0].id));
+        assert_eq!(
+            detail.calls[1].reported_model.as_deref(),
+            Some("reported-model")
+        );
+        assert!(detail.calls[1]
+            .usage_json
+            .as_deref()
+            .unwrap()
+            .contains("21"));
+        assert_eq!(
+            get_request(&path, detail.calls[0].id)
+                .unwrap()
+                .unwrap()
+                .request_json
+                .as_deref(),
+            Some(sent[0].as_str())
+        );
+        assert_eq!(
+            get_request(&path, detail.calls[1].id)
+                .unwrap()
+                .unwrap()
+                .request_json
+                .as_deref(),
+            Some(sent[1].as_str())
+        );
+        assert!(sent[0].contains("reasoning_effort"));
+        assert!(!sent[1].contains("reasoning_effort"));
+        assert!(!format!("{detail:?}").contains("PRIVATE ECHO"));
     }
 }

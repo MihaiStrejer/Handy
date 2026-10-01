@@ -322,6 +322,25 @@
     background-color 180ms ease,
     opacity 180ms ease;
 }
+
+.sprofile {
+  position: relative;
+  display: flex;
+  color: var(--s-accent);
+  flex: 0 0 16px;
+}
+
+.sprofile.arming {
+  opacity: 0.45;
+}
+
+.sprofile-edit {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  background: var(--s-surface);
+  border-radius: 2px;
+}
 .sdot.ready {
   background: var(--s-accent);
   opacity: 1;

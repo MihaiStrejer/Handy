@@ -433,6 +433,8 @@ pub struct AppSettings {
     pub word_correction_threshold: f64,
     #[serde(default = "default_history_limit")]
     pub history_limit: usize,
+    #[serde(default = "default_save_history_request_contents")]
+    pub save_history_request_contents: bool,
     #[serde(default = "default_recording_retention_period")]
     pub recording_retention_period: RecordingRetentionPeriod,
     #[serde(default)]
@@ -445,6 +447,8 @@ pub struct AppSettings {
     pub auto_submit_key: AutoSubmitKey,
     #[serde(default = "default_post_process_enabled")]
     pub post_process_enabled: bool,
+    #[serde(default)]
+    pub post_process_profiles: bool,
     #[serde(default = "default_post_process_provider_id")]
     pub post_process_provider_id: String,
     #[serde(default = "default_post_process_providers")]
@@ -611,6 +615,10 @@ fn default_auto_submit() -> bool {
 
 fn default_history_limit() -> usize {
     5
+}
+
+fn default_save_history_request_contents() -> bool {
+    true
 }
 
 fn default_recording_retention_period() -> RecordingRetentionPeriod {
@@ -936,12 +944,14 @@ pub fn get_default_settings() -> AppSettings {
         model_unload_timeout: ModelUnloadTimeout::default(),
         word_correction_threshold: default_word_correction_threshold(),
         history_limit: default_history_limit(),
+        save_history_request_contents: default_save_history_request_contents(),
         recording_retention_period: default_recording_retention_period(),
         paste_method: PasteMethod::default(),
         clipboard_handling: ClipboardHandling::default(),
         auto_submit: default_auto_submit(),
         auto_submit_key: AutoSubmitKey::default(),
         post_process_enabled: default_post_process_enabled(),
+        post_process_profiles: false,
         post_process_provider_id: default_post_process_provider_id(),
         post_process_providers: default_post_process_providers(),
         post_process_api_keys: default_post_process_api_keys(),
@@ -1052,7 +1062,8 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         default_settings
     };
 
-    if ensure_post_process_defaults(&mut settings) {
+    let profiles_normalized = normalize_profile_flag(&mut settings);
+    if ensure_post_process_defaults(&mut settings) || profiles_normalized {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -1206,7 +1217,17 @@ pub fn update_checks_effectively_enabled(settings: &AppSettings) -> bool {
     settings.update_checks_enabled && !update_checks_forced_disabled()
 }
 
-pub fn write_settings(app: &AppHandle, settings: AppSettings) {
+pub(crate) fn normalize_profile_flag(settings: &mut AppSettings) -> bool {
+    if !settings.post_process_enabled && settings.post_process_profiles {
+        settings.post_process_profiles = false;
+        true
+    } else {
+        false
+    }
+}
+
+pub fn write_settings(app: &AppHandle, mut settings: AppSettings) {
+    normalize_profile_flag(&mut settings);
     let store = app
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
         .expect("Failed to initialize store");
@@ -1240,6 +1261,26 @@ pub fn get_recording_retention_period(app: &AppHandle) -> RecordingRetentionPeri
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn profile_flag_defaults_off_and_clears_with_post_processing() {
+        let mut settings = super::get_default_settings();
+        assert!(!settings.post_process_profiles);
+        let mut legacy = serde_json::to_value(&settings).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("post_process_profiles");
+        let old: super::AppSettings = serde_json::from_value(legacy).unwrap();
+        assert!(!old.post_process_profiles);
+        settings.post_process_enabled = true;
+        settings.post_process_profiles = true;
+        assert!(!super::normalize_profile_flag(&mut settings));
+        settings.post_process_enabled = false;
+        assert!(super::normalize_profile_flag(&mut settings));
+        assert!(!settings.post_process_profiles);
+        assert!(!super::normalize_profile_flag(&mut settings));
+    }
+
     use super::*;
 
     #[test]

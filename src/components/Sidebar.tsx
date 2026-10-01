@@ -1,6 +1,14 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Cog, FlaskConical, History, Info, Sparkles, Cpu } from "lucide-react";
+import {
+  Cog,
+  FlaskConical,
+  History,
+  Info,
+  Sparkles,
+  Cpu,
+  ContactRound,
+} from "lucide-react";
 import HandyTextLogo from "./icons/HandyTextLogo";
 import HandyHand from "./icons/HandyHand";
 import { useSettings } from "../hooks/useSettings";
@@ -12,6 +20,7 @@ import {
   AboutSettings,
   PostProcessingSettings,
   ModelsSettings,
+  ContextProfilesSettings,
 } from "./settings";
 
 export type SidebarSection = keyof typeof SECTIONS_CONFIG;
@@ -62,6 +71,13 @@ export const SECTIONS_CONFIG = {
     component: PostProcessingSettings,
     enabled: (settings) => settings?.post_process_enabled ?? false,
   },
+  profiles: {
+    labelKey: "sidebar.profiles",
+    icon: ContactRound,
+    component: ContextProfilesSettings,
+    enabled: (settings) =>
+      !!(settings?.post_process_enabled && settings?.post_process_profiles),
+  },
   debug: {
     labelKey: "sidebar.debug",
     icon: FlaskConical,
@@ -101,9 +117,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           const isActive = activeSection === section.id;
 
           return (
-            <div
+            <button
+              type="button"
               key={section.id}
-              className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors ${
+              className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors text-start ${
                 isActive
                   ? "bg-logo-primary/80"
                   : "hover:bg-mid-gray/20 hover:opacity-100 opacity-85"
@@ -117,7 +134,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 {t(section.labelKey)}
               </p>
-            </div>
+            </button>
           );
         })}
       </div>

@@ -1,0 +1,26 @@
+{
+  "checked_at": "2026-09-27T09:46:56.232Z",
+  "options": [
+    "A",
+    "B",
+    "C"
+  ],
+  "states": [
+    "success",
+    "failed",
+    "legacy"
+  ],
+  "tabs": [
+    "overview",
+    "requests",
+    "calls"
+  ],
+  "checks": [
+    "request selector",
+    "tab keyboard navigation",
+    "Escape and focus restoration",
+    "680px dark/light horizontal overflow",
+    "no page errors"
+  ],
+  "real_api_calls": 0
+}

@@ -1,0 +1,14 @@
+{
+  "checked_at": "2026-09-27T08:35:34.040Z",
+  "viewport": {
+    "width": 1049,
+    "height": 737,
+    "scale": 1
+  },
+  "sectionBottom": 698.5,
+  "sidebarBottom": 698.5,
+  "sidebarHeight": 698.5,
+  "footerTop": 698.5,
+  "overflow": false,
+  "note": "Read-only native layout check; no profiles or preferences edited. Many-profile scrolling and icon persistence are checked with browser fixtures."
+}

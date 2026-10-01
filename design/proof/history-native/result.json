@@ -1,0 +1,15 @@
+{
+  "checked_at": "2026-09-27T11:10:13.738Z",
+  "native": true,
+  "endpoint": "local fixture",
+  "checks": [
+    "Native ASR, successful HTTP call, nullable custom-provider cost, and exact request archive",
+    "Retry appends a failed run, preserving success; rejection prose excluded and unknown usage stays null",
+    "Native History updates without reload, rendering failure status and inline reason",
+    "Native inspector switches immutable attempts, shows exact request and HTTP status without new requests, and restores focus on Escape",
+    "Archive-off retains usage and output, excluding request JSON and both template fields",
+    "Malformed HTTP-200 response retains reported usage without archiving response prose",
+    "Fixture removed and prior provider, model, key, prompt, and feature settings restored"
+  ],
+  "http_attempts": 4
+}

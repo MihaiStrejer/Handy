@@ -1,0 +1,37 @@
+{
+  "title": "Handy architecture · One voice session",
+  "desktopOverflow": false,
+  "missingAnchors": [],
+  "imagesLoaded": true,
+  "imageCount": 3,
+  "selects": 0,
+  "headings": [
+    "One session at a glance",
+    "A saved profile meets the focused app",
+    "Speech and context travel side by side",
+    "The reply must pass checks before output",
+    "What evidence permits automatic learning?",
+    "What this page establishes"
+  ],
+  "coverage": {
+    "startup": true,
+    "parallel": true,
+    "messages": true,
+    "data": true,
+    "cancel": true,
+    "focus": true,
+    "field": true,
+    "invalid": true,
+    "protected": true,
+    "proposed": true,
+    "decisionA": true,
+    "decisionB": true,
+    "decisionC": true
+  },
+  "missingLocalLinks": [],
+  "mobileOverflow": false,
+  "externalRequests": [],
+  "pageErrors": [],
+  "javascript": "disabled",
+  "checkedAt": "2026-09-27T09:10:48.019Z"
+}

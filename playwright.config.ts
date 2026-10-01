@@ -9,6 +9,7 @@ export default defineConfig({
   reporter: "html",
   use: {
     baseURL: "http://localhost:1420",
+    channel: process.env.PLAYWRIGHT_CHANNEL,
     trace: "on-first-retry",
   },
   projects: [

@@ -1,3 +1,4 @@
+use super::history_processing::{self, RunGuard, RunSnapshot, RunSummary};
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local, Utc};
 use log::{debug, error, info};
@@ -17,7 +18,7 @@ use tauri_specta::Event;
 /// Note: For users upgrading from tauri-plugin-sql, migrate_from_tauri_plugin_sql()
 /// converts the old _sqlx_migrations table tracking to the user_version pragma,
 /// ensuring migrations don't re-run on existing databases.
-static MIGRATIONS: &[M] = &[
+pub(crate) static MIGRATIONS: &[M] = &[
     M::up(
         "CREATE TABLE IF NOT EXISTS transcription_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,6 +32,36 @@ static MIGRATIONS: &[M] = &[
     M::up("ALTER TABLE transcription_history ADD COLUMN post_processed_text TEXT;"),
     M::up("ALTER TABLE transcription_history ADD COLUMN post_process_prompt TEXT;"),
     M::up("ALTER TABLE transcription_history ADD COLUMN post_process_requested BOOLEAN NOT NULL DEFAULT 0;"),
+    M::up(
+        "CREATE TABLE history_processing_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, entry_id INTEGER NOT NULL REFERENCES transcription_history(id) ON DELETE CASCADE,
+            session_id TEXT, started_at TEXT NOT NULL, ended_at TEXT, status TEXT NOT NULL,
+            original_text TEXT NOT NULL, processed_text TEXT, profile_id TEXT, profile_name TEXT,
+            profile_revision INTEGER, prompt_source TEXT, prompt_template TEXT,
+            provider_id TEXT, provider_name TEXT, requested_model TEXT,
+            compatibility_cache_hit BOOLEAN NOT NULL DEFAULT 0,
+            validated_operation TEXT, validated_effect_kind TEXT,
+            details_incomplete BOOLEAN NOT NULL DEFAULT 0,
+            elapsed_ms INTEGER, stop_to_output_ms INTEGER, output_outcome TEXT,
+            error_code TEXT, error_detail TEXT, metadata_version INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX history_processing_runs_entry ON history_processing_runs(entry_id, id DESC);
+        CREATE TABLE history_provider_calls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL REFERENCES history_processing_runs(id) ON DELETE CASCADE,
+            ordinal INTEGER NOT NULL, purpose TEXT NOT NULL, retry_of INTEGER,
+            provider_id TEXT NOT NULL, provider_name TEXT NOT NULL, endpoint_label TEXT NOT NULL,
+            requested_model TEXT NOT NULL, reported_model TEXT, started_at TEXT NOT NULL,
+            ended_at TEXT, elapsed_ms INTEGER, http_status INTEGER, outcome TEXT NOT NULL,
+            error_code TEXT, provider_request_id TEXT, usage_json TEXT,
+            rate_json TEXT, cost_usd TEXT,
+            UNIQUE(run_id, ordinal)
+        );
+        CREATE TABLE history_request_contents (
+            call_id INTEGER PRIMARY KEY REFERENCES history_provider_calls(id) ON DELETE CASCADE,
+            archive_status TEXT NOT NULL, request_json TEXT, byte_count INTEGER NOT NULL,
+            prompt_template TEXT
+        );",
+    ),
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -63,6 +94,7 @@ pub struct HistoryEntry {
     pub post_processed_text: Option<String>,
     pub post_process_prompt: Option<String>,
     pub post_process_requested: bool,
+    pub processing_summary: Option<RunSummary>,
 }
 
 pub struct HistoryManager {
@@ -72,6 +104,88 @@ pub struct HistoryManager {
 }
 
 impl HistoryManager {
+    pub fn start_processing_run(
+        &self,
+        entry_id: i64,
+        original: &str,
+        snapshot: RunSnapshot,
+        archive_enabled: bool,
+    ) -> Result<RunGuard> {
+        match RunGuard::start(&self.db_path, entry_id, original, snapshot, archive_enabled) {
+            Ok(mut run) => {
+                use tauri::Emitter;
+                let app_handle = self.app_handle.clone();
+                run.attach_warning(std::sync::Arc::new(move |id| {
+                    let _ = app_handle.emit("history-details-warning", id);
+                }));
+                Ok(run)
+            }
+            Err(error) => {
+                use tauri::Emitter;
+                let _ = self.app_handle.emit("history-details-warning", entry_id);
+                Err(error)
+            }
+        }
+    }
+
+    pub fn get_processing_runs(
+        &self,
+        entry_id: i64,
+    ) -> Result<Vec<history_processing::ProcessingRun>> {
+        history_processing::list_runs(&self.db_path, entry_id)
+    }
+
+    pub fn get_processing_run(&self, run_id: i64) -> Result<Option<history_processing::RunDetail>> {
+        history_processing::get_run(&self.db_path, run_id)
+    }
+
+    pub fn get_request_contents(
+        &self,
+        call_id: i64,
+    ) -> Result<Option<history_processing::RequestContents>> {
+        history_processing::get_request(&self.db_path, call_id)
+    }
+
+    pub fn clear_request_contents(&self) -> Result<usize> {
+        history_processing::clear_requests(&self.db_path)
+    }
+    pub fn set_run_output(
+        &self,
+        run_id: i64,
+        outcome: &str,
+        stop_to_output_ms: Option<i64>,
+    ) -> Result<()> {
+        history_processing::set_output(&self.db_path, run_id, outcome, stop_to_output_ms)?;
+        let conn = self.get_connection()?;
+        let entry_id: Option<i64> = conn
+            .query_row(
+                "SELECT entry_id FROM history_processing_runs WHERE id=?1",
+                [run_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(id) = entry_id {
+            self.emit_entry_update(id)?;
+        }
+        Ok(())
+    }
+
+    pub fn emit_entry_update(&self, id: i64) -> Result<()> {
+        let conn = self.get_connection()?;
+        let mut entry = conn.query_row(
+            "SELECT id,file_name,timestamp,saved,title,transcription_text,post_processed_text,post_process_prompt,post_process_requested FROM transcription_history WHERE id=?1",
+            [id], Self::map_history_entry,
+        ).optional()?;
+        if let Some(ref mut entry) = entry {
+            entry.processing_summary = history_processing::summary(&self.db_path, id)?;
+            (HistoryUpdatePayload::Updated {
+                entry: entry.clone(),
+            })
+            .emit(&self.app_handle)?;
+        }
+        Ok(())
+    }
+
     pub fn new(app_handle: &AppHandle) -> Result<Self> {
         // Create recordings directory in app data dir
         let app_data_dir = crate::portable::app_data_dir(app_handle)?;
@@ -100,6 +214,7 @@ impl HistoryManager {
         info!("Initializing database at {:?}", self.db_path);
 
         let mut conn = Connection::open(&self.db_path)?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
 
         // Handle migration from tauri-plugin-sql to rusqlite_migration
         // tauri-plugin-sql used _sqlx_migrations table, rusqlite_migration uses user_version pragma
@@ -119,6 +234,7 @@ impl HistoryManager {
 
         // Apply any pending migrations
         migrations.to_latest(&mut conn)?;
+        history_processing::reconcile_interrupted(&self.db_path)?;
 
         // Get version after migration
         let version_after: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -193,7 +309,9 @@ impl HistoryManager {
     }
 
     fn get_connection(&self) -> Result<Connection> {
-        Ok(Connection::open(&self.db_path)?)
+        let conn = Connection::open(&self.db_path)?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        Ok(conn)
     }
 
     fn map_history_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
@@ -207,6 +325,7 @@ impl HistoryManager {
             post_processed_text: row.get("post_processed_text")?,
             post_process_prompt: row.get("post_process_prompt")?,
             post_process_requested: row.get("post_process_requested")?,
+            processing_summary: None,
         })
     }
 
@@ -224,6 +343,9 @@ impl HistoryManager {
         post_processed_text: Option<String>,
         post_process_prompt: Option<String>,
     ) -> Result<HistoryEntry> {
+        let post_process_prompt = post_process_prompt.filter(|_| {
+            crate::settings::get_settings(&self.app_handle).save_history_request_contents
+        });
         let timestamp = Utc::now().timestamp();
         let title = self.format_timestamp_title(timestamp);
 
@@ -261,6 +383,7 @@ impl HistoryManager {
             post_processed_text,
             post_process_prompt,
             post_process_requested,
+            processing_summary: None,
         };
 
         debug!("Saved history entry with id {}", entry.id);
@@ -287,6 +410,9 @@ impl HistoryManager {
         post_processed_text: Option<String>,
         post_process_prompt: Option<String>,
     ) -> Result<HistoryEntry> {
+        let post_process_prompt = post_process_prompt.filter(|_| {
+            crate::settings::get_settings(&self.app_handle).save_history_request_contents
+        });
         let conn = self.get_connection()?;
         let updated = conn.execute(
             "UPDATE transcription_history
@@ -306,13 +432,14 @@ impl HistoryManager {
             return Err(anyhow!("History entry {} not found", id));
         }
 
-        let entry = conn
+        let mut entry = conn
             .query_row(
                 "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested
                  FROM transcription_history WHERE id = ?1",
                 params![id],
                 Self::map_history_entry,
             )?;
+        entry.processing_summary = history_processing::summary(&self.db_path, id)?;
 
         debug!("Updated transcription for history entry {}", id);
 
@@ -501,6 +628,9 @@ impl HistoryManager {
             entries.pop();
         }
 
+        for entry in &mut entries {
+            entry.processing_summary = history_processing::summary(&self.db_path, entry.id)?;
+        }
         Ok(PaginatedHistory { entries, has_more })
     }
 
@@ -602,7 +732,10 @@ impl HistoryManager {
              WHERE id = ?1",
         )?;
 
-        let entry = stmt.query_row([id], Self::map_history_entry).optional()?;
+        let mut entry = stmt.query_row([id], Self::map_history_entry).optional()?;
+        if let Some(ref mut entry) = entry {
+            entry.processing_summary = history_processing::summary(&self.db_path, entry.id)?;
+        }
 
         Ok(entry)
     }

@@ -1,7 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
-import { Check, Copy, FolderOpen, RotateCcw, Star, Trash2 } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import {
+  Check,
+  Copy,
+  FolderOpen,
+  PanelRightOpen,
+  RotateCcw,
+  Star,
+  Trash2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -11,10 +20,17 @@ import {
   type HistoryUpdatePayload,
 } from "@/bindings";
 import { useOsType } from "@/hooks/useOsType";
+import { useSettings } from "@/hooks/useSettings";
 import { formatDateTime } from "@/utils/dateFormat";
 import { AudioPlayer, AudioPlayerGroup } from "../../ui/AudioPlayer";
 import { Button } from "../../ui/Button";
 import { copyToClipboard } from "./clipboard";
+import {
+  HistoryInspector,
+  errorNames,
+  textButtonClass,
+} from "./HistoryInspector";
+import { formatUsd, historyApi } from "./historyApi";
 
 const IconButton: React.FC<{
   onClick: () => void;
@@ -32,6 +48,7 @@ const IconButton: React.FC<{
         : "text-text/50 hover:text-logo-primary"
     }`}
     title={title}
+    aria-label={title}
   >
     {children}
   </button>
@@ -69,6 +86,59 @@ export const HistorySettings: React.FC = () => {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const entriesRef = useRef<HistoryEntry[]>([]);
   const loadingRef = useRef(false);
+  const { settings, refreshSettings } = useSettings();
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [archiveRevision, setArchiveRevision] = useState(0);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [warningEntries, setWarningEntries] = useState<Set<number>>(new Set());
+  const triggerRefs = useRef(new Map<number, HTMLButtonElement>());
+  const archiveEnabled = settings?.save_history_request_contents ?? true;
+  const selectedEntry =
+    entries.find((entry) => entry.id === selectedId) ?? null;
+
+  useEffect(() => {
+    const unlisten = listen<number>("history-details-warning", (event) => {
+      setWarningEntries((previous) => new Set(previous).add(event.payload));
+    });
+    return () => {
+      void unlisten.then((stop) => stop());
+    };
+  }, []);
+
+  const closeInspector = () => {
+    const id = selectedId;
+    setSelectedId(null);
+    if (id !== null)
+      requestAnimationFrame(() => triggerRefs.current.get(id)?.focus());
+  };
+
+  const setArchive = async (enabled: boolean) => {
+    setArchiveBusy(true);
+    try {
+      await historyApi.setArchiveEnabled(enabled);
+      await refreshSettings();
+    } catch {
+      toast.error(t("settings.history.inspector.archiveUpdateError"));
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
+  const clearArchive = async () => {
+    setArchiveBusy(true);
+    try {
+      await historyApi.clearRequests();
+      setEntries((previous) =>
+        previous.map((entry) => ({ ...entry, post_process_prompt: null })),
+      );
+      setArchiveRevision((value) => value + 1);
+      toast.success(t("settings.history.inspector.archiveCleared"));
+    } catch {
+      toast.error(t("settings.history.inspector.archiveClearError"));
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
 
   // Keep ref in sync for use in IntersectionObserver callback
   useEffect(() => {
@@ -197,6 +267,12 @@ export const HistorySettings: React.FC = () => {
   const deleteAudioEntry = async (id: number) => {
     // Optimistically remove
     setEntries((prev) => prev.filter((e) => e.id !== id));
+    if (selectedId === id) setSelectedId(null);
+    setWarningEntries((previous) => {
+      const next = new Set(previous);
+      next.delete(id);
+      return next;
+    });
     try {
       const result = await commands.deleteHistoryEntry(id);
       if (result.status !== "ok") {
@@ -255,6 +331,16 @@ export const HistorySettings: React.FC = () => {
                 getAudioUrl={getAudioUrl}
                 deleteAudio={deleteAudioEntry}
                 retryTranscription={retryHistoryEntry}
+                selected={selectedId === entry.id}
+                onInspect={(button) => {
+                  triggerRefs.current.set(entry.id, button);
+                  setSelectedId(entry.id);
+                }}
+                registerInspect={(button) => {
+                  if (button) triggerRefs.current.set(entry.id, button);
+                  else triggerRefs.current.delete(entry.id);
+                }}
+                metadataWarning={warningEntries.has(entry.id)}
               />
             ))}
           </div>
@@ -266,7 +352,9 @@ export const HistorySettings: React.FC = () => {
   }
 
   return (
-    <div className="max-w-3xl w-full mx-auto space-y-6">
+    <div
+      className={`w-full mx-auto space-y-6 ${selectedEntry ? "max-w-6xl" : "max-w-3xl"}`}
+    >
       <div className="space-y-2">
         <div className="px-4 flex items-center justify-between">
           <div>
@@ -279,8 +367,44 @@ export const HistorySettings: React.FC = () => {
             label={t("settings.history.openFolder")}
           />
         </div>
-        <div className="bg-background border border-mid-gray/20 rounded-lg overflow-visible">
-          {content}
+        <div className="mx-4 flex flex-wrap items-center justify-between gap-2 text-xs text-text/70">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={archiveEnabled}
+              disabled={archiveBusy}
+              onChange={(event) => void setArchive(event.target.checked)}
+            />
+            {t("settings.history.inspector.saveRequests")}
+          </label>
+          <button
+            type="button"
+            disabled={archiveBusy}
+            onClick={() => void clearArchive()}
+            className={textButtonClass}
+          >
+            {t("settings.history.inspector.clearRequests")}
+          </button>
+          <p className="w-full text-text/50">
+            {t("settings.history.inspector.saveRequestsDescription")}
+          </p>
+        </div>
+        <div className="flex min-w-0 overflow-hidden rounded-lg border border-mid-gray/20 bg-background">
+          <div
+            className={`min-w-0 ${selectedEntry ? "hidden lg:block lg:w-[44%] lg:flex-none lg:overflow-y-auto" : "w-full"}`}
+          >
+            {content}
+          </div>
+          {selectedEntry && (
+            <HistoryInspector
+              key={selectedEntry.id}
+              entry={selectedEntry}
+              onClose={closeInspector}
+              metadataWarning={warningEntries.has(selectedEntry.id)}
+              refreshKey={`${JSON.stringify(selectedEntry.processing_summary)}:${archiveRevision}`}
+              archiveRevision={archiveRevision}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -294,6 +418,10 @@ interface HistoryEntryProps {
   getAudioUrl: (fileName: string) => Promise<string | null>;
   deleteAudio: (id: number) => Promise<void>;
   retryTranscription: (id: number) => Promise<void>;
+  selected: boolean;
+  onInspect: (button: HTMLButtonElement) => void;
+  registerInspect: (button: HTMLButtonElement | null) => void;
+  metadataWarning: boolean;
 }
 
 const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
@@ -303,6 +431,10 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   getAudioUrl,
   deleteAudio,
   retryTranscription,
+  selected,
+  onInspect,
+  registerInspect,
+  metadataWarning,
 }) => {
   const { t, i18n } = useTranslation();
   const [showCopied, setShowCopied] = useState(false);
@@ -352,11 +484,32 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   };
 
   const formattedDate = formatDateTime(String(entry.timestamp), i18n.language);
+  const summary = entry.processing_summary;
+  const hasProcessingDetails = Boolean(
+    summary || entry.post_processed_text || entry.post_process_prompt,
+  );
+  const status =
+    summary?.status === "running"
+      ? t("settings.history.inspector.status.running")
+      : summary?.status === "succeeded"
+        ? t("settings.history.inspector.status.succeeded")
+        : summary?.status === "cancelled"
+          ? t("settings.history.inspector.status.cancelled")
+          : summary?.status === "interrupted"
+            ? t("settings.history.inspector.status.interrupted")
+            : summary?.status === "failed"
+              ? t("settings.history.inspector.status.failed")
+              : null;
 
   return (
     <div className="px-4 py-2 pb-5 flex flex-col gap-3">
-      <div className="flex justify-between items-center">
-        <p className="text-sm font-medium">{formattedDate}</p>
+      <div className="flex flex-wrap justify-between items-center gap-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <p className="text-sm font-medium" title={entry.title}>
+            {formattedDate}
+          </p>
+          {status && <span className="text-xs text-text/60">{status}</span>}
+        </div>
         <div className="flex items-center">
           <IconButton
             onClick={handleCopyText}
@@ -369,6 +522,20 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
               <Copy width={16} height={16} />
             )}
           </IconButton>
+          {hasProcessingDetails && (
+            <button
+              ref={registerInspect}
+              type="button"
+              onClick={(event) => onInspect(event.currentTarget)}
+              aria-label={t("settings.history.inspector.open")}
+              title={t("settings.history.inspector.open")}
+              aria-expanded={selected}
+              aria-controls={`history-inspector-${entry.id}`}
+              className="rounded-md p-1.5 text-text/50 hover:text-logo-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-logo-primary"
+            >
+              <PanelRightOpen size={16} />
+            </button>
+          )}
           <IconButton
             onClick={onToggleSaved}
             disabled={retrying}
@@ -440,6 +607,65 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
       </p>
 
       <AudioPlayer onLoadRequest={handleLoadAudio} className="w-full" />
+
+      {summary && (
+        <div className="rounded-md bg-mid-gray/5 px-2 py-2 text-xs text-text/65">
+          <div className="flex flex-wrap gap-x-2 gap-y-1">
+            {summary.provider_name && (
+              <span>
+                {summary.provider_name}
+                {summary.requested_model ? ` / ${summary.requested_model}` : ""}
+              </span>
+            )}
+            {summary.profile_name && <span>{summary.profile_name}</span>}
+            {summary.elapsed_ms !== null && (
+              <span>
+                {t("settings.history.inspector.durationSeconds", {
+                  seconds: (summary.elapsed_ms / 1000).toFixed(1),
+                })}
+              </span>
+            )}
+            {summary.known_total_tokens !== null && (
+              <span>
+                {summary.usage_complete
+                  ? ""
+                  : `${t("settings.history.inspector.knownOnly")} `}
+                {summary.known_total_tokens.toLocaleString()}{" "}
+                {t("settings.history.inspector.tokens").toLowerCase()}
+              </span>
+            )}
+            {summary.total_cost_usd && (
+              <span>
+                {summary.cost_complete
+                  ? t("settings.history.inspector.estimated")
+                  : t("settings.history.inspector.knownEstimated")}{" "}
+                {formatUsd(summary.total_cost_usd)}
+              </span>
+            )}
+          </div>
+          {summary.status === "failed" && (
+            <p className="mt-1 text-red-600 dark:text-red-400" role="status">
+              {summary.error_code === "http_error" && summary.http_status
+                ? t("settings.history.inspector.httpStatus", {
+                    status: summary.http_status,
+                  })
+                : t(
+                    `settings.history.inspector.error.${errorNames[summary.error_code ?? ""] ?? "generic"}.reason`,
+                  )}
+            </p>
+          )}
+          {(summary.details_incomplete || metadataWarning) && (
+            <p role="alert" className="mt-1 text-red-600 dark:text-red-400">
+              {t("settings.history.inspector.detailsSaveFailed")}
+            </p>
+          )}
+        </div>
+      )}
+      {!summary && metadataWarning && (
+        <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+          {t("settings.history.inspector.detailsSaveFailed")}
+        </p>
+      )}
     </div>
   );
 };

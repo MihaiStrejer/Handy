@@ -1,0 +1,13 @@
+{
+  "section_03_presentation": {
+    "selected": "A",
+    "label": "Follow the reply through Handy",
+    "status": "selected_by_user",
+    "user_response": "Definitly A. Follow the reply through Handy",
+    "applied_to": "../index.html#after"
+  },
+  "G1": {
+    "status": "pending",
+    "note": "The presentation selection does not resolve the product learning decision."
+  }
+}

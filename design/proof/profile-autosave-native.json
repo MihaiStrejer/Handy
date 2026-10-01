@@ -1,0 +1,15 @@
+{
+  "checked_at": "2026-09-27T08:59:46.937Z",
+  "autosave": [
+    "name",
+    "icon",
+    "dictionary"
+  ],
+  "prompt": [
+    "typing does not save",
+    "cancel discards",
+    "invalid prompt remains open",
+    "save and close persists"
+  ],
+  "test_data": "temporary profile removed in cleanup"
+}
