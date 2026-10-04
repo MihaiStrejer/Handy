@@ -651,7 +651,7 @@ Source: [Agreed provider contract](design/implementation/context-providers.md), 
 
 ### TS02 — Verify and ship Terminal reference capture
 
-- Status: in_progress
+- Status: done
 - Depends on: TS01
 - Mode: AFK
 - Files: provider documentation, plan evidence, native proof and local installer artifacts.
@@ -659,6 +659,6 @@ Source: [Agreed provider contract](design/implementation/context-providers.md), 
 - Acceptance:
   - [x] Owned native proof captures exact highlighted fixture text and bounded current-line context, retaining the expected directory/profile.
   - [x] Regression checks pass; document the distinction between screen highlights and CLI editor selections.
-  - [ ] Push the tested change to origin and produce a verified installer/executable for the installed app.
+  - [x] Push the tested change to origin and produce a verified installer/executable for the installed app.
 - Verification: production --inspect-context, relevant Rust/frontend checks, installer integrity and packaged-executable capture.
-- Evidence: Native owned Terminal capture preserves the exact highlighted sentence/emoji, provides bounded surrounding lines and selects 3DMouse by its verified directory. Full Rust suite: 359 passed, one evaluator ignored. Clippy all targets, frontend build, ESLint and Rust formatting passed. Packaged-executable proof, installer integrity and origin push remain pending. Screen highlights are reference data; Codex CLI internal editor selection/replacement is not claimed.
+- Evidence: Native owned Terminal capture preserves the exact highlighted sentence/emoji, provides bounded surrounding lines and selects 3DMouse by its verified directory. Full Rust suite: 359 passed, one evaluator ignored. Clippy all targets, frontend build, ESLint and Rust formatting passed. Commit ad3fe15 was pushed to origin/feat/context-profiles. The unsigned debug NSIS installer passed 7-Zip integrity verification; its extracted executable passed the same native capture proof. Installer, executable, SHA256 manifest and copied proof are in D:/Tools/Handy-builds/context-profiles-ad3fe15. The installed app was not replaced. Screen highlights are reference data; Codex CLI internal editor selection/replacement, microphone and real-model runs in this build are not claimed.
