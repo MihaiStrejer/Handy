@@ -1,5 +1,5 @@
 //! Application extractors share one bounded snapshot contract and registry.
-use super::session::Captured;
+use super::session::{Captured, SelectionKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Debug)]
@@ -48,6 +48,9 @@ impl Default for ProviderContext {
 
 pub(super) trait ContextProvider: Sync {
     fn id(&self) -> ProviderId;
+    fn selection_kind(&self) -> SelectionKind {
+        SelectionKind::Editable
+    }
     fn matches(&self, application: &str, window_class: &str) -> bool;
     #[cfg(target_os = "windows")]
     fn extract(
@@ -83,6 +86,9 @@ impl ContextProvider for T3Code {
 impl ContextProvider for Terminal {
     fn id(&self) -> ProviderId {
         ProviderId::WindowsTerminal
+    }
+    fn selection_kind(&self) -> SelectionKind {
+        SelectionKind::Reference
     }
     fn matches(&self, application: &str, class: &str) -> bool {
         (application.eq_ignore_ascii_case("WindowsTerminal.exe")

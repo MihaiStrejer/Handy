@@ -7,8 +7,8 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const LOOKUP_BUDGET: Duration = Duration::from_millis(250);
-const SELECTION_LIMIT: usize = 2048;
-const SURROUNDING_LIMIT: usize = 4096;
+pub(super) const SELECTION_LIMIT: usize = 2048;
+pub(super) const SURROUNDING_LIMIT: usize = 4096;
 
 fn unavailable() -> InputContext {
     InputContext {
@@ -16,9 +16,11 @@ fn unavailable() -> InputContext {
         application: Captured::Unavailable,
         workspace: Captured::Unavailable,
         selection: Captured::Unavailable,
+        selection_kind: Default::default(),
         surrounding_text: Captured::Unavailable,
         caret_utf16: Captured::Unavailable,
         selection_range_utf16: None,
+        input_identity: None,
         captured_at_ms: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -120,7 +122,7 @@ impl CaptureService {
     }
 }
 
-fn bounded_text(value: &str, limit: usize) -> (String, bool) {
+pub(super) fn bounded_text(value: &str, limit: usize) -> (String, bool) {
     let mut chars = value.chars();
     let text: String = chars.by_ref().take(limit).collect();
     (text, chars.next().is_some())
@@ -181,6 +183,7 @@ mod windows_reader {
         };
         let provider = super::super::providers::select(application, &class);
         context.provider.id = provider.id();
+        context.selection_kind = provider.selection_kind();
         context.provider.window_title = super::super::providers::metadata(
             &super::super::provider_windows::window_title(target.window),
         );
@@ -207,6 +210,9 @@ mod windows_reader {
                             context.provider.branch = Captured::Uncertain;
                             context.provider.terminal_tab = Captured::Uncertain;
                             context.provider.input = Captured::Uncertain;
+                            context.selection = Captured::Uncertain;
+                            context.surrounding_text = Captured::Uncertain;
+                            context.input_identity = None;
                         }
                     }
                     CoUninitialize();
@@ -218,6 +224,9 @@ mod windows_reader {
                 context.provider.conversation = Captured::Uncertain;
                 context.provider.branch = Captured::Uncertain;
                 context.provider.input = Captured::Uncertain;
+                context.selection = Captured::Uncertain;
+                context.surrounding_text = Captured::Uncertain;
+                context.input_identity = None;
             }
             return context;
         }

@@ -236,11 +236,14 @@ impl Source {
         }
     }
     pub(super) fn terminal(&self, input: &mut InputContext) -> Result<()> {
+        input.selection_kind = super::session::SelectionKind::Reference;
         if let Some(tab) = self.selected_tab()? {
             input.provider.terminal_tab = metadata(&tab);
             let Some((pane, title)) = self.terminal_pane()? else {
                 return Ok(());
             };
+            let window = window_title(self.target.window);
+            let text = unsafe { super::terminal_input::read(&pane, &tab, &title, &window) };
             let directory = super::terminal_process::workspace(&self.target, &title);
             let stable_pane = match self.terminal_pane()? {
                 Some((after, after_title)) if after_title == title => unsafe {
@@ -248,11 +251,23 @@ impl Source {
                 },
                 _ => false,
             };
-            if !stable_pane || self.selected_tab()? != Some(tab) {
+            if !stable_pane || self.selected_tab()? != Some(tab.clone()) {
                 input.workspace = Captured::Uncertain;
                 input.provider.workspace_source = Captured::Uncertain;
+                input.selection = Captured::Uncertain;
+                input.surrounding_text = Captured::Uncertain;
                 return Ok(());
             }
+            let after = unsafe {
+                super::terminal_input::read(&pane, &tab, &title, &window_title(self.target.window))
+            };
+            super::terminal_input::publish(input, text, after);
+            input.provider.input = Captured::Present(InputMetadata {
+                name: "Terminal screen".into(),
+                role: "terminal_screen".into(),
+                editable: false,
+                text_pattern: unsafe { pane.GetCurrentPattern(UIA_TextPatternId).is_ok() },
+            });
             if let Some(directory) = directory {
                 input.workspace = Captured::Present(directory);
                 input.provider.workspace_source =

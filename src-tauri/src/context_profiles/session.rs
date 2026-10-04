@@ -21,6 +21,25 @@ pub(super) enum Captured<T> {
     TimedOut,
 }
 
+/// A terminal screen selection supplies context, never an editable text range.
+#[derive(Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum SelectionKind {
+    #[default]
+    Editable,
+    Reference,
+}
+
+/// Opaque accessibility evidence stays local and cannot enter request archives.
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct InputIdentity {
+    pub element: Vec<i32>,
+    pub tab: String,
+    pub console_title: String,
+    pub window_title: String,
+    pub range_rectangles: Vec<u64>,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct InputContext {
     #[serde(default)]
@@ -28,12 +47,16 @@ pub(super) struct InputContext {
     pub application: Captured<String>,
     pub workspace: Captured<String>,
     pub selection: Captured<String>,
+    #[serde(default)]
+    pub selection_kind: SelectionKind,
     pub surrounding_text: Captured<String>,
     /// UTF-16 code units within the captured surrounding text, when verified.
     pub caret_utf16: Captured<u32>,
     /// Local evidence for exact replacement; never sent to the endpoint.
     #[serde(skip)]
     pub selection_range_utf16: Option<(u32, u32)>,
+    #[serde(skip)]
+    pub input_identity: Option<InputIdentity>,
     pub captured_at_ms: u64,
     pub truncated: bool,
 }
@@ -183,6 +206,11 @@ impl SessionStore {
                 name: context.profile_name.clone(),
                 icon: context.icon.clone(),
                 input_mode: match &context.input.selection {
+                    Captured::Present(_)
+                        if context.input.selection_kind == SelectionKind::Reference =>
+                    {
+                        "compose"
+                    }
                     Captured::Present(_) => "edit",
                     Captured::Empty => "compose",
                     Captured::Protected => "protected",
@@ -218,6 +246,18 @@ impl SessionStore {
             .as_ref()
             .filter(|s| s.id == id)
             .and_then(|s| s.target.clone()))
+    }
+
+    pub(super) fn input_identity(
+        &self,
+        id: SessionId,
+    ) -> Result<Option<InputIdentity>, &'static str> {
+        let state = self.0.lock().map_err(|_| "Context session lock poisoned")?;
+        Ok(state
+            .active
+            .as_ref()
+            .filter(|s| s.id == id)
+            .and_then(|s| s.context.as_ref()?.input.input_identity.clone()))
     }
 
     pub(super) fn attach_capture(
@@ -382,6 +422,8 @@ mod tests {
                 surrounding_text: Captured::Unavailable,
                 caret_utf16: Captured::Unavailable,
                 selection_range_utf16: None,
+                selection_kind: Default::default(),
+                input_identity: None,
                 captured_at_ms: 1,
                 truncated: false,
             },
@@ -476,6 +518,36 @@ mod tests {
         assert!(json.get("process_id").is_none());
         assert_eq!(json["input"]["selection"]["availability"], "empty");
         assert_eq!(json["input"]["workspace"]["availability"], "unavailable");
+    }
+
+    #[test]
+    fn reference_highlights_do_not_show_an_edit_indicator_or_reuse_a_newer_identity() {
+        let store = SessionStore::default();
+        let id = store.begin(1, None, true).unwrap();
+        let mut context = context("Project");
+        context.input.selection = Captured::Present("Highlighted terminal output".into());
+        context.input.selection_kind = SelectionKind::Reference;
+        context.input.input_identity = Some(InputIdentity {
+            element: vec![42, 1],
+            tab: "Project".into(),
+            console_title: "Project".into(),
+            window_title: "Project".into(),
+            range_rectangles: vec![],
+        });
+        store.resolve(id, 1, context).unwrap();
+        assert_eq!(
+            store
+                .display()
+                .unwrap()
+                .unwrap()
+                .profile
+                .unwrap()
+                .input_mode,
+            "compose"
+        );
+        assert!(store.input_identity(id).unwrap().is_some());
+        store.begin(1, None, true).unwrap();
+        assert!(store.input_identity(id).unwrap().is_none());
     }
 
     #[test]

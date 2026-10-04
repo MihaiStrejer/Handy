@@ -633,3 +633,32 @@ Source: [Agreed provider contract](design/implementation/context-providers.md), 
   - [x] Existing profile/memory tests pass, owned proof data is isolated, and unsupported input/workspace/platform capabilities are stated accurately.
 - Verification: native read-only builder inspection, relevant full Rust/frontend suites, translation coverage and changed-file formatting; record actual commands, profile decisions and live proof with human verdicts pending.
 - Evidence: On-demand Project directory, T3 Code and Terminal templates preserve existing data; the optional UI preference received no reply, so the recommended on-demand assumption was used. New browser tests cover directory-only autosave, retained long-term memory and stable/Nightly T3 rules. Started-executable inspection (not GUI/microphone proof) captured T3 and Claude and selected their intended profiles; an owned PowerShell Forms window used default/General despite its matching legacy executable rule. Full Rust/browser/build/lint/translation checks are recorded in design/implementation/context-providers.md. Proof index: D:/Tools/Handy-qa/2026-10-04_feat-context-profiles_started-app/index.md; three human verdicts pending. T3 verified workspace integration, browser exact-field learning, microphone/real-model QA and PM work remain outside this completed provider metadata scope.
+
+### TS01 — Capture bounded Terminal reference text
+
+- Status: done
+- Depends on: CP03
+- Mode: AFK
+- Files: terminal input reader, provider/capture/session owners, request/feedback tests.
+- Source: User testing on 2026-10-04: the latest 3DMouse request contained the correct directory but no selection or surrounding text. The user authorized adding selection/input capture.
+- Acceptance:
+  - [x] Read the unique active pane's highlighted TextPattern range and a bounded excerpt around that range or the screen cursor, without clipboard reads or full scrollback traversal.
+  - [x] Mark terminal screen text as reference context, distinguish it from an editable selection, and keep output as insertion into the active input.
+  - [x] Bind capture and preflight to local pane identity, tab/console title and range evidence; changed or uncertain snapshots cannot claim a valid editable selection.
+  - [x] Preserve native Edit replacement/readback learning; terminal reference capture grants neither replacement nor memory authority.
+- Verification: native started-executable capture against an owned Terminal fixture; request-envelope, operation, stale-pane and memory-admission regression tests; existing Rust checks.
+- Evidence: Native owned fixture captured the exact UIA highlight including an emoji, preserved it, supplied bounded neighboring lines and retained the verified D:/3DMouseShell directory/3DMouse profile. With no highlight it captured nearby screen-cursor lines without inventing an editable caret. Proof: D:/Tools/Handy-builds/terminal-selection-qa/selected-reference.json and cursor-reference.json. The user confirmed Codex CLI in Windows Terminal; screen reference capture is implemented, while CLI editor selection/replacement remains unavailable. Regression tests cover same text in a different pane/range, unsupported patterns, reference operation validation and denied learning.
+
+### TS02 — Verify and ship Terminal reference capture
+
+- Status: in_progress
+- Depends on: TS01
+- Mode: AFK
+- Files: provider documentation, plan evidence, native proof and local installer artifacts.
+- Source: TS01 and the existing authorization to test and push origin/feat/context-profiles.
+- Acceptance:
+  - [x] Owned native proof captures exact highlighted fixture text and bounded current-line context, retaining the expected directory/profile.
+  - [x] Regression checks pass; document the distinction between screen highlights and CLI editor selections.
+  - [ ] Push the tested change to origin and produce a verified installer/executable for the installed app.
+- Verification: production --inspect-context, relevant Rust/frontend checks, installer integrity and packaged-executable capture.
+- Evidence: Native owned Terminal capture preserves the exact highlighted sentence/emoji, provides bounded surrounding lines and selects 3DMouse by its verified directory. Full Rust suite: 359 passed, one evaluator ignored. Clippy all targets, frontend build, ESLint and Rust formatting passed. Packaged-executable proof, installer integrity and origin push remain pending. Screen highlights are reference data; Codex CLI internal editor selection/replacement is not claimed.

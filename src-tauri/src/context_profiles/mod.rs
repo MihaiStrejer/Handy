@@ -19,6 +19,8 @@ pub(crate) mod storage;
 mod target;
 mod template;
 #[cfg(target_os = "windows")]
+mod terminal_input;
+#[cfg(target_os = "windows")]
 mod terminal_process;
 
 pub(crate) use capture::CaptureService;

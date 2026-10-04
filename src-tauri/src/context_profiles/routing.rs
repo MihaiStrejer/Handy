@@ -156,6 +156,8 @@ mod tests {
                 surrounding_text: Captured::Unavailable,
                 caret_utf16: Captured::Unavailable,
                 selection_range_utf16: None,
+                selection_kind: Default::default(),
+                input_identity: None,
                 captured_at_ms: 0,
                 truncated: false,
             },

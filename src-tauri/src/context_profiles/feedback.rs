@@ -33,6 +33,9 @@ impl ExpectedChange {
         prediction: &Prediction,
         inserted: &str,
     ) -> Option<Self> {
+        if input.selection_kind == super::session::SelectionKind::Reference {
+            return None;
+        }
         let original = field(input)?;
         let raw: Vec<u16> = original.encode_utf16().collect();
         let (start, end) = input.selection_range_utf16?;
@@ -157,6 +160,8 @@ pub(super) mod tests {
                 Captured::Unavailable
             },
             selection_range_utf16: Some((start, end)),
+            selection_kind: Default::default(),
+            input_identity: None,
             captured_at_ms: 1,
             truncated: false,
         };
@@ -180,6 +185,15 @@ pub(super) mod tests {
             memory_changes: vec![super::super::memory_proposals::correction()],
             memory_skip_reason: None,
         }
+    }
+
+    #[test]
+    fn terminal_screen_cannot_authorize_learning_even_with_fabricated_edit_offsets() {
+        let mut input = context("bomb", 0, 4).input;
+        input.selection_kind = super::super::session::SelectionKind::Reference;
+        assert!(ExpectedChange::new(&input, &correction(), "BOM").is_none());
+        input.selection_kind = super::super::session::SelectionKind::Editable;
+        assert!(ExpectedChange::new(&input, &correction(), "BOM").is_some());
     }
 
     #[test]
