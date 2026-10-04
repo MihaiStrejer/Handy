@@ -1,0 +1,6 @@
+{
+  "asset": "3dmouse.png",
+  "tool": "built-in image_gen.imagegen",
+  "transparent_background": true,
+  "prompt": "Use case: stylized-concept. Asset type: custom profile icon for the user's 3DMouse profile in a desktop application, square PNG with genuine transparent background. Primary request: a beautiful, polished 3D navigation mouse / CAD controller icon, a short sculpted cylindrical navigation puck atop a compact rounded triangular weighted base, unmistakably a six-axis spatial controller. Style: premium simplified 3D product illustration, crisp clean silhouette readable at 24 to 48 pixels. Composition: one centered device in a slightly elevated three-quarter view, fills approximately 84% of the square canvas, all edges visible, balanced compact footprint. Materials: satin graphite puck with a brushed aluminum silver rim and clean softly beveled base, restrained cool luminous accent along the puck rim, studio highlights with enough light edge contrast for a dark interface. Background: fully transparent, only the isolated device and a very subtle contact shadow. No text, logos, cables, floating arrows, hands, extra objects, or watermark. Make this a finished attractive UI icon rather than a scene or a photograph."
+}
