@@ -24,9 +24,9 @@ struct Workspace {
     process: u32,
 }
 
-fn sole_workspace(mut owned: Vec<Option<Workspace>>) -> Option<Workspace> {
-    if owned.len() == 1 {
-        owned.pop().flatten()
+fn sole_workspace(mut matching: Vec<Option<Workspace>>) -> Option<Workspace> {
+    if matching.len() == 1 {
+        matching.pop().flatten()
     } else {
         None
     }
@@ -216,11 +216,11 @@ fn inspect(window: usize, tab: &str) -> Option<Workspace> {
             let title_length = GetConsoleTitleW(&mut title) as usize;
             let console_title = String::from_utf16_lossy(&title[..title_length.min(title.len())]);
             if owner.0 as usize == window && seen.insert(console.0 as usize) {
-                // A title cannot distinguish inactive tabs with the same title.
-                // Until terminal pane-to-console binding is available, accept
-                // only a window with one owned console, even for unique titles.
+                // The caller supplies the unique visible TermControl's actual
+                // connected-console title, not the editable tab caption. Count
+                // every matching owned console, including unreadable clients,
+                // so duplicate titles cannot select an arbitrary inactive tab.
                 if console_title != tab {
-                    matches.push(None);
                     drop(detach);
                     continue;
                 }
@@ -229,7 +229,11 @@ fn inspect(window: usize, tab: &str) -> Option<Workspace> {
                 if count > 0 && count <= clients.len() {
                     if let Some(process) = leaf(&clients[..count], &parents, observer) {
                         let directory = cwd(process);
-                        matches.push(directory.map(|directory| Workspace {
+                        let mut after = [0u16; 514];
+                        let count = GetConsoleTitleW(&mut after) as usize;
+                        let stable =
+                            String::from_utf16_lossy(&after[..count.min(after.len())]) == tab;
+                        matches.push(directory.filter(|_| stable).map(|directory| Workspace {
                             directory,
                             process,
                             console: console.0 as usize,
@@ -371,7 +375,7 @@ unsafe fn cwd(pid: u32) -> Option<String> {
 mod tests {
     use super::*;
     #[test]
-    fn an_unavailable_owned_console_still_makes_workspace_selection_ambiguous() {
+    fn an_unavailable_matching_console_still_makes_workspace_selection_ambiguous() {
         let candidate = || {
             Some(Workspace {
                 directory: "D:\\Work".into(),

@@ -204,19 +204,59 @@ impl Source {
             })
         }
     }
+    fn terminal_pane(&self) -> Result<Option<(IUIAutomationElement, String)>> {
+        if window_class(self.target.window) == "ConsoleWindowClass" {
+            return Ok(Some((self.root.clone(), window_title(self.target.window))));
+        }
+        unsafe {
+            // TermControl HelpText is the connected console's title, whereas
+            // the tab caption can be overridden. Only one visible pane is
+            // eligible; split panes need their own focused-element integration.
+            let condition = self
+                .automation
+                .CreatePropertyCondition(UIA_ClassNamePropertyId, &VARIANT::from("TermControl"))?;
+            let controls = self.root.FindAll(TreeScope_Descendants, &condition)?;
+            if controls.Length()? > 64 {
+                return Ok(None);
+            }
+            let mut visible = vec![];
+            for i in 0..controls.Length()? {
+                let control = controls.GetElement(i)?;
+                if !control.CurrentIsOffscreen()?.as_bool() {
+                    visible.push(control);
+                }
+            }
+            if let [control] = visible.as_slice() {
+                let title = control.CurrentHelpText()?.to_string();
+                if !title.is_empty() && title.chars().count() <= 512 {
+                    return Ok(Some((control.clone(), title)));
+                }
+            }
+            Ok(None)
+        }
+    }
     pub(super) fn terminal(&self, input: &mut InputContext) -> Result<()> {
         if let Some(tab) = self.selected_tab()? {
             input.provider.terminal_tab = metadata(&tab);
-            if let Some(directory) = super::terminal_process::workspace(&self.target, &tab) {
-                input.workspace = Captured::Present(directory);
-                input.provider.workspace_source =
-                    Captured::Present("console_owner_selected_tab_process_cwd".into());
-            }
-            // Recheck selected tab after the helper; a same-HWND tab switch
-            // must not attach a directory from the previous tab.
-            if self.selected_tab()? != Some(tab) {
+            let Some((pane, title)) = self.terminal_pane()? else {
+                return Ok(());
+            };
+            let directory = super::terminal_process::workspace(&self.target, &title);
+            let stable_pane = match self.terminal_pane()? {
+                Some((after, after_title)) if after_title == title => unsafe {
+                    self.automation.CompareElements(&pane, &after)?.as_bool()
+                },
+                _ => false,
+            };
+            if !stable_pane || self.selected_tab()? != Some(tab) {
                 input.workspace = Captured::Uncertain;
                 input.provider.workspace_source = Captured::Uncertain;
+                return Ok(());
+            }
+            if let Some(directory) = directory {
+                input.workspace = Captured::Present(directory);
+                input.provider.workspace_source =
+                    Captured::Present("console_owner_visible_pane_process_cwd".into());
             }
         }
         Ok(())
