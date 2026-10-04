@@ -23,6 +23,8 @@ pub(super) enum Captured<T> {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct InputContext {
+    #[serde(default)]
+    pub provider: super::providers::ProviderContext,
     pub application: Captured<String>,
     pub workspace: Captured<String>,
     pub selection: Captured<String>,
@@ -37,17 +39,13 @@ pub(super) struct InputContext {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(super) struct DictionaryEntry {
-    pub id: String,
-    pub canonical: String,
-    pub misheard_forms: Vec<String>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
 pub(super) struct MemoryItem {
     pub id: String,
+    pub revision: u32,
     pub text: String,
-    pub source_session: String,
+    pub wrong: Option<String>,
+    pub corrected: Option<String>,
+    pub scope: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -79,8 +77,8 @@ pub(super) struct ResolvedContext {
     pub prompt: String,
     pub prompt_source: PromptSource,
     pub prompt_revision: u64,
-    pub dictionary_revision: u64,
-    pub dictionary: Vec<DictionaryEntry>,
+    pub long_term_memory_revision: u64,
+    pub long_term_memory: String,
     pub memory: Vec<MemoryItem>,
     #[serde(skip)]
     pub memory_epoch: u64,
@@ -94,22 +92,15 @@ pub(super) enum TextOperation {
     ReplaceSelection,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub(super) enum FeedbackEffect {
-    None {},
-    AddMisheardForm { keyword_id: String, phrase: String },
-    Remember { text: String },
-}
-
-/// A model proposes an operation and an effect; it never supplies destination,
-/// profile, session, or completion authority.
+/// Receiving a proposal never grants destination or memory authority.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Prediction {
     pub text: String,
     pub operation: TextOperation,
-    pub effect: FeedbackEffect,
+    pub memory_changes: Vec<super::memory_proposals::MemoryProposal>,
+    #[serde(skip)]
+    pub memory_skip_reason: Option<String>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -129,7 +120,7 @@ struct Session {
     captured: Option<InputContext>,
     context: Option<ResolvedContext>,
     prediction: Option<Prediction>,
-    feedback_text: Option<String>,
+    feedback_batch: Vec<super::memory_proposals::MemoryProposal>,
     phase: Phase,
 }
 
@@ -177,7 +168,7 @@ impl SessionStore {
             captured: None,
             context: None,
             prediction: None,
-            feedback_text: None,
+            feedback_batch: vec![],
             phase: Phase::Resolving,
         });
         Ok(id)
@@ -295,10 +286,13 @@ impl SessionStore {
         }) else {
             return Ok(false);
         };
-        session.feedback_text = session
-            .context
-            .as_ref()
-            .and_then(|context| super::feedback::memory_text(context, &prediction, transcript));
+        if let Some(context) = &session.context {
+            if super::memory_proposals::validate(context, transcript, &prediction.memory_changes)
+                .is_ok()
+            {
+                session.feedback_batch = prediction.memory_changes.clone();
+            }
+        }
         session.prediction = Some(prediction);
         session.phase = Phase::Predicted;
         Ok(true)
@@ -312,7 +306,7 @@ impl SessionStore {
         Ok(state
             .active
             .as_ref()
-            .filter(|s| s.id == id && s.phase == Phase::Predicted && s.feedback_text.is_some())
+            .filter(|s| s.id == id && s.phase == Phase::Predicted && !s.feedback_batch.is_empty())
             .and_then(|s| Some((s.context.clone()?, s.prediction.clone()?))))
     }
 
@@ -321,7 +315,11 @@ impl SessionStore {
         &self,
         id: SessionId,
         generation: u64,
-        commit: impl FnOnce(&ResolvedContext, &str, &str) -> Result<bool, String>,
+        commit: impl FnOnce(
+            &ResolvedContext,
+            &[super::memory_proposals::MemoryProposal],
+            &str,
+        ) -> Result<bool, String>,
     ) -> Result<bool, String> {
         let mut state = self.0.lock().map_err(|_| "Context session lock poisoned")?;
         let Some(session) = state.active.as_mut().filter(|s| {
@@ -330,8 +328,13 @@ impl SessionStore {
             return Ok(false);
         };
         session.phase = Phase::FeedbackConsumed;
-        match (&session.context, session.feedback_text.take()) {
-            (Some(context), Some(text)) => commit(context, &text, &id.serial.to_string()),
+        match (
+            &session.context,
+            std::mem::take(&mut session.feedback_batch),
+        ) {
+            (Some(context), batch) if !batch.is_empty() => {
+                commit(context, &batch, &id.serial.to_string())
+            }
             _ => Ok(false),
         }
     }
@@ -367,16 +370,13 @@ mod tests {
             prompt: "Rewrite {{transcript}}".into(),
             prompt_source: PromptSource::Inherited,
             prompt_revision: 2,
-            dictionary_revision: 3,
-            dictionary: vec![DictionaryEntry {
-                id: "codex".into(),
-                canonical: "Codex".into(),
-                misheard_forms: vec!["codecks".into()],
-            }],
+            long_term_memory_revision: 3,
+            long_term_memory: "Use Codex for codecks.".into(),
             memory: vec![],
             memory_epoch: 0,
             input: InputContext {
                 application: Captured::Present("terminal".into()),
+                provider: crate::context_profiles::providers::ProviderContext::default(),
                 workspace: Captured::Unavailable,
                 selection: Captured::Empty,
                 surrounding_text: Captured::Unavailable,
@@ -392,7 +392,8 @@ mod tests {
         Prediction {
             text: "Codex".into(),
             operation: TextOperation::Insert,
-            effect: FeedbackEffect::None {},
+            memory_changes: vec![],
+            memory_skip_reason: None,
         }
     }
 
@@ -444,10 +445,10 @@ mod tests {
         let id = store.begin(0, None, true).unwrap();
         let mut original = context("general");
         assert!(store.resolve(id, 0, original.clone()).unwrap());
-        original.dictionary[0].canonical = "changed".into();
+        original.long_term_memory = "changed".into();
         assert!(!store.resolve(id, 0, original).unwrap());
         let snapshot = store.begin_request(id, 0).unwrap().unwrap();
-        assert_eq!(snapshot.dictionary[0].canonical, "Codex");
+        assert_eq!(snapshot.long_term_memory, "Use Codex for codecks.");
         assert!(store.begin_request(id, 0).unwrap().is_none());
         assert!(store
             .accept_prediction(id, 0, prediction(), "speech")
@@ -480,11 +481,11 @@ mod tests {
     #[test]
     fn prediction_cannot_assert_profile_or_output_completion() {
         assert!(serde_json::from_str::<Prediction>(
-            r#"{"text":"x","operation":"insert","effect":{"type":"none"},"completed":true}"#
+            r#"{"text":"x","operation":"insert","memory_changes":[],"completed":true}"#
         )
         .is_err());
         assert!(serde_json::from_str::<Prediction>(
-            r#"{"text":"x","operation":"insert","effect":{"type":"none","profile_id":"other"}}"#
+            r#"{"text":"x","operation":"insert","memory_changes":[],"profile_id":"other"}"#
         )
         .is_err());
     }

@@ -117,6 +117,12 @@ struct ChatCompletionRequest {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_format: Option<ResponseFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parallel_tool_calls: Option<bool>,
     #[serde(flatten)]
     reasoning: ReasoningParams,
 }
@@ -136,11 +142,27 @@ pub struct CallContext<'a> {
 #[derive(Debug, Deserialize)]
 struct ChatChoice {
     message: ChatMessageResponse,
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ChatMessageResponse {
     content: Option<String>,
+    tool_calls: Option<Vec<ToolCall>>,
+    refusal: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolCall {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    function: ToolFunction,
+}
+#[derive(Debug, Deserialize)]
+struct ToolFunction {
+    name: String,
+    arguments: String,
 }
 
 /// Build headers for API requests based on provider type
@@ -367,6 +389,48 @@ pub async fn send_chat_completion_observed(
     disable_reasoning: bool,
     observation: Option<CallContext<'_>>,
 ) -> Result<Option<String>, String> {
+    send_chat_completion_configured(
+        provider,
+        api_key,
+        model,
+        user_content,
+        system_prompt,
+        json_schema,
+        disable_reasoning,
+        observation,
+        CompletionOptions::default(),
+    )
+    .await
+}
+
+pub(crate) struct CompletionOptions {
+    pub schema_name: &'static str,
+    pub response_limit: usize,
+    pub tool_schema: Option<Value>,
+    pub strict_response: bool,
+}
+impl Default for CompletionOptions {
+    fn default() -> Self {
+        Self {
+            schema_name: "transcription_output",
+            response_limit: 2 * 1024 * 1024,
+            tool_schema: None,
+            strict_response: false,
+        }
+    }
+}
+
+pub(crate) async fn send_chat_completion_configured(
+    provider: &PostProcessProvider,
+    api_key: String,
+    model: &str,
+    user_content: String,
+    system_prompt: Option<String>,
+    json_schema: Option<Value>,
+    disable_reasoning: bool,
+    observation: Option<CallContext<'_>>,
+    options: CompletionOptions,
+) -> Result<Option<String>, String> {
     let base_url = provider.base_url.trim_end_matches('/');
     let url = format!("{}/chat/completions", base_url);
 
@@ -398,7 +462,7 @@ pub async fn send_chat_completion_observed(
     let response_format = json_schema.map(|schema| ResponseFormat {
         format_type: "json_schema".to_string(),
         json_schema: JsonSchema {
-            name: "transcription_output".to_string(),
+            name: options.schema_name.to_string(),
             strict: true,
             schema,
         },
@@ -417,6 +481,12 @@ pub async fn send_chat_completion_observed(
         stream: false,
         response_format,
         reasoning,
+        tools: options.tool_schema.as_ref().map(|schema| serde_json::json!([{
+            "type":"function","function":{"name":"submit_rewrite","description":"Submit the final rewrite and staged short-term corrections.",
+                "strict":true,"parameters":schema}
+        }])),
+        tool_choice: options.tool_schema.as_ref().map(|_| serde_json::json!({"type":"function","function":{"name":"submit_rewrite"}})),
+        parallel_tool_calls: options.tool_schema.as_ref().map(|_| false),
     };
 
     let mut previous_call = observation.as_ref().and_then(|context| context.retry_of);
@@ -428,6 +498,7 @@ pub async fn send_chat_completion_observed(
         model,
         observation.as_ref(),
         &mut previous_call,
+        options.response_limit,
     )
     .await?;
     let mut status = response.0;
@@ -457,6 +528,7 @@ pub async fn send_chat_completion_observed(
             model,
             observation.as_ref(),
             &mut previous_call,
+            options.response_limit,
         )
         .await?;
         status = response.0;
@@ -483,10 +555,94 @@ pub async fn send_chat_completion_observed(
     let completion: ChatCompletionResponse = serde_json::from_slice(&response.1)
         .map_err(|_| "Endpoint returned invalid response JSON".to_string())?;
 
-    Ok(completion
-        .choices
-        .first()
-        .and_then(|choice| choice.message.content.clone()))
+    completion_content(
+        completion,
+        options.tool_schema.is_some(),
+        options.strict_response,
+    )
+}
+
+fn completion_content(
+    completion: ChatCompletionResponse,
+    native: bool,
+    strict: bool,
+) -> Result<Option<String>, String> {
+    if (native || strict) && completion.choices.len() != 1 {
+        return Err("Endpoint returned an ambiguous submission".into());
+    }
+    let Some(choice) = completion.choices.first() else {
+        return Ok(None);
+    };
+    if choice
+        .message
+        .refusal
+        .as_ref()
+        .is_some_and(|text| !text.is_empty())
+        || matches!(
+            choice.finish_reason.as_deref(),
+            Some("length" | "content_filter")
+        )
+    {
+        return Err("Endpoint refused or truncated the submission".into());
+    }
+    if native {
+        let Some(calls) = &choice.message.tool_calls else {
+            return Err("Endpoint did not return the forced submission".into());
+        };
+        if calls.len() != 1 {
+            return Err("Endpoint returned an ambiguous submission".into());
+        }
+        let call = &calls[0];
+        if call.kind != "function"
+            || call.function.name != "submit_rewrite"
+            || call.id.is_empty()
+            || call.id.len() > 128
+            || choice.finish_reason.as_deref() != Some("tool_calls")
+            || choice
+                .message
+                .content
+                .as_ref()
+                .is_some_and(|text| !text.trim().is_empty())
+            || call.function.arguments.len() > 128_000
+        {
+            return Err("Endpoint returned an invalid submission function".into());
+        }
+        Ok(Some(call.function.arguments.clone()))
+    } else {
+        if choice
+            .message
+            .tool_calls
+            .as_ref()
+            .is_some_and(|calls| !calls.is_empty())
+        {
+            return Err("Endpoint returned an unexpected submission function".into());
+        }
+        Ok(choice.message.content.clone())
+    }
+}
+
+async fn read_bounded_response(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Err("Response body exceeds its limit".into());
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| "Could not read endpoint response")?
+    {
+        if body.len().saturating_add(chunk.len()) > limit {
+            return Err("Response body exceeds its limit".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 async fn send_attempt(
@@ -497,6 +653,7 @@ async fn send_attempt(
     model: &str,
     observation: Option<&CallContext<'_>>,
     previous_call: &mut Option<i64>,
+    response_limit: usize,
 ) -> Result<(reqwest::StatusCode, Vec<u8>), String> {
     // The archived string is passed unchanged as the HTTP body. It contains no headers.
     let body_json =
@@ -554,12 +711,12 @@ async fn send_attempt(
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
         })
         .map(str::to_owned);
-    let body_bytes = match response.bytes().await {
+    let body_bytes = match read_bounded_response(response, response_limit).await {
         Ok(bytes) => bytes,
         Err(error) => {
             if let Some(ref mut guard) = guard {
-                let code = if error.is_timeout() {
-                    "timeout"
+                let code = if error == "Response body exceeds its limit" {
+                    "response_limit"
                 } else {
                     "body_error"
                 };
@@ -577,7 +734,7 @@ async fn send_attempt(
                     }
                 }
             }
-            return Err(report_reqwest_error("Failed to read API response", &error));
+            return Err(error);
         }
     };
     let metadata: Option<Value> = if body_bytes.len() <= 2 * 1024 * 1024 {
@@ -768,6 +925,45 @@ pub async fn fetch_models(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_submission_accepts_null_content_and_rejects_ambiguous_authority() {
+        let args = r#"{"text":"BOM","operation":"insert","memory_changes":[]}"#;
+        let valid = serde_json::json!({"choices":[{"finish_reason":"tool_calls","message":{"content":null,
+            "tool_calls":[{"id":"call-1","type":"function","function":{"name":"submit_rewrite","arguments":args}}]}}]});
+        assert_eq!(
+            completion_content(serde_json::from_value(valid.clone()).unwrap(), true, true)
+                .unwrap()
+                .as_deref(),
+            Some(args)
+        );
+        let mut refused = valid.clone();
+        refused["choices"][0]["message"]["refusal"] = serde_json::json!("No");
+        assert!(completion_content(serde_json::from_value(refused).unwrap(), true, true).is_err());
+        for path in ["name", "arguments"] {
+            let mut bad = valid.clone();
+            bad["choices"][0]["message"]["tool_calls"][0]["function"][path] =
+                serde_json::json!(if path == "name" {
+                    "write_long_term_memory".into()
+                } else {
+                    "x".repeat(128001)
+                });
+            assert!(completion_content(serde_json::from_value(bad).unwrap(), true, true).is_err());
+        }
+        let mut multiple = valid.clone();
+        let call = multiple["choices"][0]["message"]["tool_calls"][0].clone();
+        multiple["choices"][0]["message"]["tool_calls"]
+            .as_array_mut()
+            .unwrap()
+            .push(call);
+        assert!(completion_content(serde_json::from_value(multiple).unwrap(), true, true).is_err());
+        let mut truncated = valid.clone();
+        truncated["choices"][0]["finish_reason"] = serde_json::json!("length");
+        assert!(
+            completion_content(serde_json::from_value(truncated).unwrap(), true, true).is_err()
+        );
+        assert!(completion_content(serde_json::from_value(valid).unwrap(), false, true).is_err());
+    }
     use std::fmt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -811,6 +1007,9 @@ mod tests {
             }],
             stream: false,
             response_format: None,
+            tools: None,
+            tool_choice: None,
+            parallel_tool_calls: None,
             reasoning,
         };
         serde_json::to_value(&request).unwrap()

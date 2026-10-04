@@ -1,0 +1,46 @@
+{
+  "profiles": {
+    "schema_version": 1,
+    "revision": 7,
+    "next_id": 2,
+    "profiles": [
+      {
+        "id": "general",
+        "name": "General",
+        "revision": 7,
+        "dictionary_revision": 3,
+        "icon": "generic",
+        "rules": [],
+        "prompt": "Rewrite {{transcript}} using {{ dictionary }}.",
+        "dictionary": [
+          {
+            "id": "codex",
+            "canonical": "Codex",
+            "misheard_forms": ["codecks", "code X"]
+          }
+        ]
+      },
+      {
+        "id": "profile-1",
+        "name": "Memory proof Mail",
+        "revision": 6,
+        "dictionary_revision": 2,
+        "icon": "mail",
+        "rules": [
+          {
+            "application": "memory-proof-mail.exe",
+            "workspace": null
+          }
+        ],
+        "prompt": null,
+        "dictionary": [
+          {
+            "id": "bank",
+            "canonical": "banque",
+            "misheard_forms": ["bank"]
+          }
+        ]
+      }
+    ]
+  }
+}

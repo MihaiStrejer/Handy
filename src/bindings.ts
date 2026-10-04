@@ -240,6 +240,38 @@ async getContextProfiles() : Promise<Result<ProfileCatalog, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async startProfileConsolidation(profileId: string, instructions: string) : Promise<Result<ConsolidationOperation, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_profile_consolidation", { profileId, instructions }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getProfileConsolidation(profileId: string) : Promise<Result<ConsolidationOperation | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_profile_consolidation", { profileId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async cancelProfileConsolidation(profileId: string, operationId: string) : Promise<Result<ConsolidationOperation, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cancel_profile_consolidation", { profileId, operationId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async undoProfileConsolidation(profileId: string, expectedRevision: number) : Promise<Result<ProfileCatalog, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("undo_profile_consolidation", { profileId, expectedRevision }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async importProfileIcon(path: string) : Promise<Result<string, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("import_profile_icon", { path }) };
@@ -248,7 +280,7 @@ async importProfileIcon(path: string) : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async saveContextProfile(profile: Profile, expectedRevision: number) : Promise<Result<ProfileCatalog, string>> {
+async saveContextProfile(profile: ProfileEdit, expectedRevision: number) : Promise<Result<ProfileCatalog, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("save_context_profile", { profile, expectedRevision }) };
 } catch (e) {
@@ -267,6 +299,14 @@ async deleteContextProfile(id: string, expectedRevision: number) : Promise<Resul
 async getProfileMemory(profileId: string) : Promise<Result<MemoryRecord[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_profile_memory", { profileId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getProfileMemorySkipReason(profileId: string) : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_profile_memory_skip_reason", { profileId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1106,6 +1146,8 @@ export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AvailableAccelerators = { transcribe: string[]; ort: string[]; gpu_devices: GpuDeviceOption[] }
 export type BindingResponse = { success: boolean; binding: ShortcutBinding | null; error: string | null }
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
+export type ConsolidationOperation = { operation_id: string; profile_id: string; provider_name: string; model: string; status: ConsolidationStatus; error_code: string | null; can_undo: boolean }
+export type ConsolidationStatus = "running" | "committed" | "unchanged" | "cancelled" | "conflict" | "failed" | "undone"
 export type CustomSounds = { start: boolean; stop: boolean }
 export type EngineType =
 /**
@@ -1131,10 +1173,10 @@ export type KeyboardDiagnosticReport = { secure_input_enabled: boolean; culprit_
  */
 key_down: number; key_up: number; flags_changed: number; mouse: number; duration_ms: number }
 export type KeyboardImplementation = "tauri" | "handy_keys"
-export type Keyword = { id: string; canonical: string; misheard_forms: string[] }
 export type LLMPrompt = { id: string; name: string; prompt: string }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
-export type MemoryRecord = { id: string; text: string; source_session: string }
+export type LongTermUndo = { text: string; committed_revision: number }
+export type MemoryRecord = { id: string; text: string; source_session: string; proposal_index: number; revision: number; evidence_quote: string; provenance: string; wrong: string | null; corrected: string | null; scope: string | null }
 export type ModelInfo = { id: string; name: string; description: string; filename: string; source: ModelSource; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; is_directory: boolean; engine_type: EngineType; accuracy_score: number; speed_score: number; supports_translation: boolean; is_recommended: boolean; supported_languages: string[]; supports_language_selection: boolean; is_custom: boolean; supports_streaming: boolean; supports_language_detection: boolean }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }
 /**
@@ -1176,12 +1218,16 @@ export type PasteMethod = "ctrl_v" | "direct" | "none" | "shift_insert" | "ctrl_
 export type PermissionAccess = "allowed" | "denied" | "unknown"
 export type PostProcessProvider = { id: string; label: string; base_url: string; allow_base_url_edit?: boolean; models_endpoint?: string | null; supports_structured_output?: boolean }
 export type ProcessingRun = { id: number; entry_id: number; session_id: string | null; started_at: string; ended_at: string | null; status: string; original_text: string; processed_text: string | null; profile_id: string | null; profile_name: string | null; profile_revision: number | null; prompt_source: string | null; prompt_template: string | null; elapsed_ms: number | null; stop_to_output_ms: number | null; output_outcome: string | null; error_code: string | null; error_detail: string | null; provider_id: string | null; provider_name: string | null; requested_model: string | null; compatibility_cache_hit: boolean; validated_operation: string | null; validated_effect_kind: string | null; details_incomplete: boolean }
-export type Profile = { id: string; name: string; revision: number; dictionary_revision: number; icon: ProfileIcon; rules: RoutingRule[];
+export type Profile = { id: string; name: string; revision: number; rewrite_context_revision: number; long_term_memory_revision: number; icon: ProfileIcon; rules: RoutingRule[];
 /**
  * General must own a template. None on other profiles inherits General.
  */
-prompt: string | null; dictionary: Keyword[] }
+prompt: string | null; long_term_memory: string; consolidation_instructions: string | null; long_term_undo?: LongTermUndo | null; last_consolidation?: ConsolidationOperation | null }
 export type ProfileCatalog = { schema_version: number; revision: number; next_id: number; profiles: Profile[] }
+/**
+ * The ordinary editor cannot supply memory or backend-owned revisions.
+ */
+export type ProfileEdit = { id: string; name: string; icon: ProfileIcon; rules: RoutingRule[]; prompt: string | null; consolidation_instructions: string | null }
 export type ProfileIcon = "generic" | "terminal" | "code" | "mail" | "chrome" | "firefox" | "vscode" | "intellij" | "claude" | "codex" | "pi" | "opencode" | "github" | "slack" | "notes" | { custom: string }
 export type ProfileIndicator = { name: string; icon: string; input_mode: string }
 export type ProviderCall = { id: number; run_id: number; ordinal: number; purpose: string; retry_of: number | null; provider_id: string; provider_name: string; endpoint_label: string; requested_model: string; reported_model: string | null; started_at: string; ended_at: string | null; elapsed_ms: number | null; http_status: number | null; outcome: string; error_code: string | null; provider_request_id: string | null; usage_json: string | null; rate_json: string | null; cost_usd: string | null; archive_status: string; request_bytes: number }

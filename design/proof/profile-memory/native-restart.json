@@ -1,0 +1,13 @@
+{
+  "checked_at": "2026-10-03T11:22:35.586Z",
+  "schema": 3,
+  "migrated_literals": true,
+  "exact_backup_sha256": "a446ccba034f6c054c47680eb3d784ef2a86cf777c30bb796890a5c5296d808b",
+  "two_profile_isolation": true,
+  "narrow_save_rejects_memory": false,
+  "instruction_persistence": true,
+  "button_right_of_input": true,
+  "empty_memory_rejects_without_http": true,
+  "endpoint_requests": 0,
+  "scope": "Real Tauri commands/store and native WebView UI. No microphone or model-driven promotion; those remain separate verification gates."
+}

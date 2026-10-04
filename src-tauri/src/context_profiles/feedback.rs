@@ -1,74 +1,13 @@
 //! A model proposes memory; only a verified local field change admits it.
-use super::session::{
-    Captured, FeedbackEffect, InputContext, Prediction, ResolvedContext, TextOperation,
-};
+#[cfg(test)]
+use super::session::ResolvedContext;
+use super::session::{Captured, InputContext, Prediction, TextOperation};
 use super::{CaptureService, SessionId, SessionStore};
 use tauri::{Emitter, Manager};
 
-fn normalize(text: &str) -> String {
-    text.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
-}
-
-// Match words/phrases, not an accidental substring inside another word.
-fn contains_phrase(text: &str, phrase: &str) -> bool {
-    let text = normalize(text);
-    let phrase = normalize(phrase);
-    !phrase.is_empty()
-        && text.match_indices(&phrase).any(|(at, _)| {
-            let end = at + phrase.len();
-            !text[..at]
-                .chars()
-                .next_back()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_')
-                && !text[end..]
-                    .chars()
-                    .next()
-                    .is_some_and(|c| c.is_alphanumeric() || c == '_')
-        })
-}
-
-pub(super) fn memory_text(
-    context: &ResolvedContext,
-    prediction: &Prediction,
-    transcript: &str,
-) -> Option<String> {
-    match &prediction.effect {
-        FeedbackEffect::None {} => None,
-        // New corrections need not have a long-term dictionary entry. The
-        // endpoint is instructed to propose only explicit user corrections.
-        FeedbackEffect::Remember { text } => {
-            (!text.trim().is_empty() && text.chars().count() <= 500).then(|| text.trim().to_owned())
-        }
-        FeedbackEffect::AddMisheardForm { keyword_id, phrase } => {
-            let keyword = context.dictionary.iter().find(|k| &k.id == keyword_id)?;
-            let normalized = normalize(phrase);
-            if normalized.is_empty()
-                || phrase.chars().count() > 120
-                || normalized == normalize(&keyword.canonical)
-                || !contains_phrase(&prediction.text, &keyword.canonical)
-                || !(contains_phrase(transcript, phrase)
-                    || matches!(&context.input.selection, Captured::Present(text) if contains_phrase(text, phrase)))
-                || context.dictionary.iter().any(|k| {
-                    k.id != *keyword_id
-                        && (normalize(&k.canonical) == normalized
-                            || k.misheard_forms
-                                .iter()
-                                .any(|form| normalize(form) == normalized))
-                })
-            {
-                return None;
-            }
-            // The legacy effect remains accepted, but never mutates a keyword.
-            Some(format!(
-                "Interpret {} as {} in this conversation.",
-                serde_json::to_string(phrase.trim()).ok()?,
-                serde_json::to_string(&keyword.canonical).ok()?
-            ))
-            .filter(|text| text.chars().count() <= 500)
-        }
+pub(crate) fn skip_pending(app: &tauri::AppHandle, id: SessionId, reason: &str) {
+    if let Ok(Some((context, _))) = app.state::<SessionStore>().feedback(id) {
+        super::storage::report_memory_skip(app, &context.profile_id, reason);
     }
 }
 
@@ -140,9 +79,11 @@ pub(crate) fn verify_and_remember(
         return Ok(());
     };
     let Some(expected) = ExpectedChange::new(&context.input, &prediction, inserted) else {
+        super::storage::report_memory_skip(app, &context.profile_id, "readback_unavailable");
         return Ok(());
     };
     let Some(target) = store.target(id)? else {
+        super::storage::report_memory_skip(app, &context.profile_id, "readback_unavailable");
         return Ok(());
     };
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1000);
@@ -150,6 +91,7 @@ pub(crate) fn verify_and_remember(
         if store.current(audio.cancel_generation())? != Some(id)
             || super::capture_target().as_ref() != Some(&target)
         {
+            super::storage::report_memory_skip(app, &context.profile_id, "session_changed");
             return Ok(());
         }
         let actual = app
@@ -160,19 +102,23 @@ pub(crate) fn verify_and_remember(
             if super::capture_target().as_ref() != Some(&target) {
                 return Ok(());
             }
-            let added =
-                store.commit_feedback(id, audio.cancel_generation(), |context, text, source| {
-                    super::storage::admit_memory(app, context, text, source)
-                })?;
+            let added = store.commit_feedback(
+                id,
+                audio.cancel_generation(),
+                |context, batch, source| super::storage::admit_memory(app, context, batch, source),
+            )?;
             if added {
                 // Only an ID crosses the event bus; the UI fetches current memory.
                 app.emit("profile-memory-updated", &context.profile_id)
                     .map_err(|_| "Could not refresh profile memory")?;
+            } else {
+                super::storage::report_memory_skip(app, &context.profile_id, "context_changed");
             }
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(40));
     }
+    super::storage::report_memory_skip(app, &context.profile_id, "readback_failed");
     Ok(())
 }
 
@@ -192,6 +138,7 @@ pub(super) mod tests {
     ) -> ResolvedContext {
         let raw: Vec<u16> = text.encode_utf16().collect();
         let input = InputContext {
+            provider: crate::context_profiles::providers::ProviderContext::default(),
             application: Captured::Present("test.exe".into()),
             workspace: Captured::Unavailable,
             selection: if start == end {
@@ -230,27 +177,26 @@ pub(super) mod tests {
         Prediction {
             text: "BOM".into(),
             operation: TextOperation::ReplaceSelection,
-            effect: FeedbackEffect::Remember {
-                text: "Use BOM (bill of materials) when bomb refers to this term.".into(),
-            },
+            memory_changes: vec![super::super::memory_proposals::correction()],
+            memory_skip_reason: None,
         }
     }
 
     #[test]
-    fn explicit_correction_without_dictionary_returns_text_and_memory() {
+    fn explicit_correction_requires_grounded_transcript() {
         let context = context("Review the bomb today", 11, 15);
-        assert!(context.dictionary.is_empty());
-        assert_eq!(correction().text, "BOM");
-        assert!(memory_text(
+        assert!(super::super::memory_proposals::validate(
             &context,
-            &correction(),
-            "thats not bomb its BOM from bill of materials"
+            "not bomb, BOM",
+            &correction().memory_changes
         )
-        .unwrap()
-        .contains("bill of materials"));
-        let mut ordinary = correction();
-        ordinary.effect = FeedbackEffect::None {};
-        assert!(memory_text(&context, &ordinary, "change my mind").is_none());
+        .is_ok());
+        assert!(super::super::memory_proposals::validate(
+            &context,
+            "ordinary rewriting",
+            &correction().memory_changes
+        )
+        .is_err());
     }
 
     #[test]
@@ -303,34 +249,17 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn legacy_mishearing_requires_existing_unambiguous_observed_keyword() {
-        use super::super::session::DictionaryEntry;
-        let mut context = context("bomb", 0, 4);
-        context.dictionary.push(DictionaryEntry {
-            id: "bom".into(),
-            canonical: "BOM".into(),
-            misheard_forms: vec![],
-        });
-        let mut prediction = correction();
-        prediction.effect = FeedbackEffect::AddMisheardForm {
-            keyword_id: "bom".into(),
-            phrase: "bomb".into(),
-        };
-        assert!(memory_text(&context, &prediction, "correct it").is_some());
-        prediction.text = "BOMBER".into();
-        assert!(memory_text(&context, &prediction, "correct it").is_none());
-        prediction.text = "BOM".into();
-        context.input.selection = Captured::Empty;
-        assert!(memory_text(&context, &prediction, "bombard").is_none());
-        assert!(memory_text(&context, &prediction, "that's not bomb").is_some());
-        context.dictionary.push(DictionaryEntry {
-            id: "other".into(),
-            canonical: "Other".into(),
-            misheard_forms: vec!["bomb".into()],
-        });
-        assert!(memory_text(&context, &prediction, "bomb").is_none());
-        context.dictionary.clear();
-        assert!(memory_text(&context, &prediction, "bomb").is_none());
+    fn explicit_statement_without_readback_cannot_establish_completion() {
+        let mut before = context("bomb", 0, 4);
+        let prediction = correction();
+        assert!(super::super::memory_proposals::validate(
+            &before,
+            "not bomb, BOM",
+            &prediction.memory_changes
+        )
+        .is_ok());
+        before.input.surrounding_text = Captured::Unavailable;
+        assert!(ExpectedChange::new(&before.input, &prediction, "BOM").is_none());
     }
 
     #[test]
@@ -350,7 +279,7 @@ pub(super) mod tests {
             .unwrap());
         let mut memory = MemoryState::default();
         assert!(store
-            .commit_feedback(id, 0, |c, t, s| Ok(memory.admit(
+            .commit_feedback(id, 0, |c, t, s| Ok(memory.admit_batch(
                 &c.profile_id,
                 c.memory_epoch,
                 t,

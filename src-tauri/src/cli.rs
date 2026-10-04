@@ -4,6 +4,14 @@ use std::path::PathBuf;
 #[derive(Parser, Debug, Clone, Default)]
 #[command(name = "handy", about = "Handy - Speech to Text")]
 pub struct CliArgs {
+    /// Inspect the focused application's context without recording or model calls.
+    #[arg(long)]
+    pub inspect_context: bool,
+    /// Internal disposable console observer. Never initializes the Handy GUI.
+    #[arg(long, hide = true)]
+    pub context_helper: Option<usize>,
+    #[arg(long, hide = true, requires = "context_helper")]
+    pub context_tab: Option<String>,
     /// Start with the main window hidden
     #[arg(long)]
     pub start_hidden: bool,

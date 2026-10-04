@@ -6,6 +6,8 @@ import {
   commands,
   type Profile,
   type ProfileCatalog,
+  type ProfileEdit,
+  type ConsolidationOperation,
   type MemoryRecord,
 } from "@/bindings";
 import {
@@ -16,9 +18,9 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import "./ContextProfilesSettings.css";
 
-const tabs = ["context", "dictionary", "memory"] as const;
+const tabs = ["context", "longTerm", "memory"] as const;
 const variables = [
-  "dictionary",
+  "long_term_memory",
   "short_term_memory",
   "input_context",
   "transcript",
@@ -26,14 +28,13 @@ const variables = [
 type Tab = (typeof tabs)[number];
 let pendingUnmountSave: Promise<boolean> | null = null;
 
-const normalizeDictionary = (profile: Profile): Profile => ({
-  ...profile,
-  dictionary: profile.dictionary.map((item) => ({
-    ...item,
-    misheard_forms: item.misheard_forms
-      .map((form) => form.trim())
-      .filter(Boolean),
-  })),
+const profileEdit = (profile: Profile): ProfileEdit => ({
+  id: profile.id,
+  name: profile.name,
+  icon: profile.icon,
+  rules: profile.rules,
+  prompt: profile.prompt,
+  consolidation_instructions: profile.consolidation_instructions,
 });
 
 export function ContextProfilesSettings() {
@@ -44,12 +45,21 @@ export function ContextProfilesSettings() {
   const [error, setError] = useState("");
   const [iconError, setIconError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [preset, setPreset] = useState("terminal");
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState("");
   const [promptReset, setPromptReset] = useState(false);
   const [promptError, setPromptError] = useState("");
   const [promptBusy, setPromptBusy] = useState(false);
   const [memory, setMemory] = useState<MemoryRecord[]>([]);
+  const [memorySkip, setMemorySkip] = useState<string | null>(null);
+  const [consolidation, setConsolidation] =
+    useState<ConsolidationOperation | null>(null);
+  const [consolidationError, setConsolidationError] = useState<string | null>(
+    null,
+  );
+  const [consolidationBusy, setConsolidationBusy] = useState(false);
+  const refreshConsolidationRef = useRef<() => Promise<void>>(async () => {});
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const catalogRef = useRef<ProfileCatalog | null>(null);
@@ -75,6 +85,7 @@ export function ContextProfilesSettings() {
     setError("");
     setIconError("");
     setMemory([]);
+    setMemorySkip(null);
   };
   const load = async () => {
     try {
@@ -115,6 +126,7 @@ export function ContextProfilesSettings() {
     let request = 0;
     const profileId = draft?.id;
     setMemory([]);
+    setMemorySkip(null);
     const refresh = async () => {
       if (!profileId) return;
       const version = ++request;
@@ -123,6 +135,9 @@ export function ContextProfilesSettings() {
         if (!current || version !== request) return;
         if (result.status === "ok") setMemory(result.data);
         else setError(result.error);
+        const skip = await commands.getProfileMemorySkipReason(profileId);
+        if (current && version === request && skip.status === "ok")
+          setMemorySkip(skip.data);
       } catch {
         if (current && version === request) setError(p("requestFailed"));
       }
@@ -152,12 +167,90 @@ export function ContextProfilesSettings() {
     };
   }, [draft?.id, tab]);
 
+  useEffect(() => {
+    let current = true;
+    let request = 0;
+    let refreshed = "";
+    const profileId = draft?.id;
+    setConsolidation(null);
+    setConsolidationError(null);
+    setConsolidationBusy(false);
+    const refresh = async () => {
+      if (!profileId) return;
+      const version = ++request;
+      try {
+        const result = await commands.getProfileConsolidation(profileId);
+        if (!current || version !== request) return;
+        if (result.status === "error") {
+          setConsolidationError(result.error);
+          return;
+        }
+        setConsolidation(result.data);
+        const operation = result.data;
+        if (operation && ["committed", "undone"].includes(operation.status)) {
+          const key = `${operation.operation_id}:${operation.status}`;
+          if (refreshed === key) return;
+          const catalog = await commands.getContextProfiles();
+          if (!current || version !== request || catalog.status !== "ok")
+            return;
+          if (catalog.data.revision < (catalogRef.current?.revision ?? 0))
+            return;
+          catalogRef.current = catalog.data;
+          setCatalog(catalog.data);
+          const saved = catalog.data.profiles.find(
+            (item) => item.id === profileId,
+          );
+          const draft = draftRef.current;
+          if (saved && draft?.id === profileId) {
+            draftRef.current = {
+              ...draft,
+              revision: saved.revision,
+              rewrite_context_revision: saved.rewrite_context_revision,
+              long_term_memory: saved.long_term_memory,
+              long_term_memory_revision: saved.long_term_memory_revision,
+              long_term_undo: saved.long_term_undo,
+              last_consolidation: saved.last_consolidation,
+            };
+            setDraft(draftRef.current);
+          }
+          refreshed = key;
+        }
+      } catch {
+        if (current && version === request)
+          setConsolidationError("operation_failed");
+      }
+    };
+    refreshConsolidationRef.current = refresh;
+    const subscription = listen<ConsolidationOperation>(
+      "profile-consolidation-updated",
+      ({ payload }) => {
+        if (current && payload.profile_id === profileId) void refresh();
+      },
+    );
+    void subscription
+      .then(() => {
+        if (current) void refresh();
+      })
+      .catch(() => {
+        if (current) void refresh();
+      });
+    // Polling makes status discoverable after a missed event or a remount.
+    const timer = setInterval(() => void refresh(), 750);
+    return () => {
+      current = false;
+      clearInterval(timer);
+      refreshConsolidationRef.current = async () => {};
+      void subscription.then((unlisten) => unlisten()).catch(() => {});
+    };
+  }, [draft?.id]);
+
   const saveLatest = async (): Promise<boolean> => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = null;
     if (savePromiseRef.current) return savePromiseRef.current;
     if (savedVersionRef.current === editVersionRef.current) return true;
     const work = async (): Promise<boolean> => {
+      let revisionRetries = 0;
       while (savedVersionRef.current !== editVersionRef.current) {
         const profile = draftRef.current;
         const currentCatalog = catalogRef.current;
@@ -165,11 +258,26 @@ export function ContextProfilesSettings() {
         const version = editVersionRef.current;
         try {
           const result = await commands.saveContextProfile(
-            normalizeDictionary(profile),
+            profileEdit(profile),
             currentCatalog.revision,
           );
           if (result.status === "error") {
             if (editVersionRef.current !== version) continue;
+            if (
+              result.error === "Profiles changed; reload before saving" &&
+              revisionRetries < 2
+            ) {
+              const latest = await commands.getContextProfiles();
+              if (
+                latest.status === "ok" &&
+                latest.data.revision > currentCatalog.revision
+              ) {
+                revisionRetries++;
+                catalogRef.current = latest.data;
+                if (mountedRef.current) setCatalog(latest.data);
+                continue;
+              }
+            }
             lastSaveErrorRef.current = result.error;
             if (mountedRef.current) {
               setError(result.error);
@@ -190,7 +298,11 @@ export function ContextProfilesSettings() {
               ...draftRef.current,
               id: saved.id,
               revision: saved.revision,
-              dictionary_revision: saved.dictionary_revision,
+              rewrite_context_revision: saved.rewrite_context_revision,
+              long_term_memory_revision: saved.long_term_memory_revision,
+              long_term_memory: saved.long_term_memory,
+              long_term_undo: saved.long_term_undo,
+              last_consolidation: saved.last_consolidation,
             };
             if (mountedRef.current) setDraft(draftRef.current);
           }
@@ -311,7 +423,7 @@ export function ContextProfilesSettings() {
         return;
       }
       const result = await commands.saveContextProfile(
-        { ...current, prompt: nextPrompt },
+        profileEdit({ ...current, prompt: nextPrompt }),
         currentCatalog.revision,
       );
       if (result.status === "error") {
@@ -352,6 +464,76 @@ export function ContextProfilesSettings() {
     }
   };
 
+  const startConsolidation = async () => {
+    const id = draftRef.current?.id;
+    if (!id) return;
+    setConsolidationBusy(true);
+    setConsolidationError(null);
+    try {
+      if (!(await saveLatest())) return;
+      const draft = draftRef.current;
+      if (!draft || draft.id !== id) return;
+      const instructions =
+        draft.consolidation_instructions ??
+        p("consolidation.defaultInstructions");
+      const result = await commands.startProfileConsolidation(id, instructions);
+      if (!mountedRef.current || draftRef.current?.id !== id) return;
+      if (result.status === "error") setConsolidationError(result.error);
+      else {
+        setConsolidationError(null);
+        await refreshConsolidationRef.current();
+      }
+    } catch {
+      if (mountedRef.current && draftRef.current?.id === id)
+        setConsolidationError("operation_failed");
+    } finally {
+      if (mountedRef.current && draftRef.current?.id === id)
+        setConsolidationBusy(false);
+    }
+  };
+
+  const cancelConsolidation = async () => {
+    const operation = consolidation;
+    if (!operation) return;
+    try {
+      const result = await commands.cancelProfileConsolidation(
+        operation.profile_id,
+        operation.operation_id,
+      );
+      if (!mountedRef.current || draftRef.current?.id !== operation.profile_id)
+        return;
+      if (result.status === "error") setConsolidationError(result.error);
+      else await refreshConsolidationRef.current();
+    } catch {
+      if (mountedRef.current && draftRef.current?.id === operation.profile_id)
+        setConsolidationError("operation_failed");
+    }
+  };
+
+  const undoConsolidation = async () => {
+    const id = draftRef.current?.id;
+    if (!id) return;
+    setConsolidationBusy(true);
+    try {
+      if (!(await saveLatest())) return;
+      const draft = draftRef.current;
+      if (!draft || draft.id !== id) return;
+      const result = await commands.undoProfileConsolidation(
+        id,
+        draft.long_term_memory_revision,
+      );
+      if (!mountedRef.current || draftRef.current?.id !== id) return;
+      if (result.status === "error") setConsolidationError(result.error);
+      else await refreshConsolidationRef.current();
+    } catch {
+      if (mountedRef.current && draftRef.current?.id === id)
+        setConsolidationError("operation_failed");
+    } finally {
+      if (mountedRef.current && draftRef.current?.id === id)
+        setConsolidationBusy(false);
+    }
+  };
+
   if (!catalog || !draft)
     return <div role="status">{error || p("loading")}</div>;
   const general = catalog.profiles.find((profile) => profile.id === "general")!;
@@ -368,7 +550,9 @@ export function ContextProfilesSettings() {
             const subtitle =
               profile.id === "general"
                 ? p("fallback")
-                : profile.rules.map((rule) => rule.application).join(", ");
+                : profile.rules
+                    .map((rule) => rule.workspace ?? rule.application)
+                    .join(", ");
             return (
               <button
                 className="profile-selector-item"
@@ -392,6 +576,18 @@ export function ContextProfilesSettings() {
             );
           })}
         </div>
+        <label className="profile-preset">
+          {p("preset")}
+          <select
+            className="profile-field"
+            value={preset}
+            onChange={(event) => setPreset(event.target.value)}
+          >
+            <option value="project">{p("presets.project")}</option>
+            <option value="t3">{p("presets.t3")}</option>
+            <option value="terminal">{p("presets.terminal")}</option>
+          </select>
+        </label>
         <Button
           className="profile-add"
           size="sm"
@@ -402,11 +598,27 @@ export function ContextProfilesSettings() {
               id: "",
               name: "",
               revision: 0,
-              dictionary_revision: 0,
-              icon: "terminal",
-              rules: [{ application: "WindowsTerminal.exe", workspace: null }],
+              rewrite_context_revision: 0,
+              long_term_memory_revision: 0,
+              icon: preset === "terminal" ? "terminal" : "code",
+              rules:
+                preset === "t3"
+                  ? [
+                      { application: "T3 Code.exe", workspace: null },
+                      { application: "T3 Code (Nightly).exe", workspace: null },
+                    ]
+                  : [
+                      {
+                        application:
+                          preset === "project" ? "" : "WindowsTerminal.exe",
+                        workspace: null,
+                      },
+                    ],
               prompt: null,
-              dictionary: [],
+              long_term_memory: "",
+              long_term_undo: null,
+              last_consolidation: null,
+              consolidation_instructions: null,
             })
           }
         >
@@ -538,6 +750,26 @@ export function ContextProfilesSettings() {
                     {draft.rules.map((rule, index) => (
                       <div className="profile-rule" key={index}>
                         <label>
+                          {p("workspace")}
+                          <input
+                            className="profile-field"
+                            value={rule.workspace ?? ""}
+                            onChange={(event) =>
+                              updateDraft((current) => ({
+                                ...current,
+                                rules: current.rules.map((item, i) =>
+                                  i === index
+                                    ? {
+                                        ...item,
+                                        workspace: event.target.value || null,
+                                      }
+                                    : item,
+                                ),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
                           {p("application")}
                           <input
                             className="profile-field"
@@ -574,6 +806,7 @@ export function ContextProfilesSettings() {
                       </div>
                     ))}
                     <p className="profile-hint">{p("applicationHint")}</p>
+                    <p className="profile-hint">{p("workspaceHint")}</p>
                     <Button
                       size="sm"
                       variant="secondary"
@@ -741,99 +974,124 @@ export function ContextProfilesSettings() {
               </Dialog>
             </>
           )}
-          {tab === "dictionary" && (
-            <fieldset disabled={busy} className="profile-fields">
-              <legend>{p("tab.dictionary")}</legend>
-              <p className="profile-hint">{p("dictionaryHint")}</p>
-              {draft.dictionary.length === 0 && (
-                <p className="profile-hint">{p("dictionaryEmpty")}</p>
-              )}
-              {draft.dictionary.map((keyword, index) => (
-                <div className="profile-keyword" key={keyword.id}>
-                  <div className="profile-keyword-canonical">
-                    <label>
-                      {p("canonical")}
-                      <input
-                        className="profile-field"
-                        value={keyword.canonical}
-                        maxLength={120}
-                        onChange={(event) =>
-                          updateDraft((current) => ({
-                            ...current,
-                            dictionary: current.dictionary.map((item, i) =>
-                              i === index
-                                ? { ...item, canonical: event.target.value }
-                                : item,
-                            ),
-                          }))
-                        }
-                      />
-                    </label>
+          {tab === "longTerm" && (
+            <section className="profile-fields" aria-label={p("tab.longTerm")}>
+              <p className="profile-hint">{p("longTermHint")}</p>
+              <pre className="profile-prompt-preview">
+                {draft.long_term_memory || p("longTermEmpty")}
+              </pre>
+              <div className="profile-consolidation-row">
+                <label>
+                  {p("consolidation.instructions")}
+                  <textarea
+                    className="profile-field"
+                    rows={7}
+                    maxLength={4000}
+                    value={
+                      draft.consolidation_instructions ??
+                      p("consolidation.defaultInstructions")
+                    }
+                    onChange={(event) =>
+                      updateDraft((current) => ({
+                        ...current,
+                        consolidation_instructions: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <div className="profile-consolidation-actions">
+                  <Button
+                    size="sm"
+                    disabled={
+                      consolidationBusy ||
+                      consolidation?.status === "running" ||
+                      !draft.id ||
+                      memory.length === 0
+                    }
+                    onClick={() => void startConsolidation()}
+                  >
+                    {p("consolidation.update")}
+                  </Button>
+                  {consolidation?.status === "running" && (
                     <Button
                       size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        updateDraft((current) => ({
-                          ...current,
-                          dictionary: current.dictionary.filter(
-                            (_, i) => i !== index,
-                          ),
-                        }))
-                      }
+                      variant="secondary"
+                      onClick={() => void cancelConsolidation()}
                     >
-                      {p("removeKeyword")}
+                      {p("cancel")}
                     </Button>
-                  </div>
-                  <label>
-                    {p("misheard")}
-                    <textarea
-                      className="profile-field"
-                      rows={3}
-                      value={keyword.misheard_forms.join("\n")}
-                      onChange={(event) =>
-                        updateDraft((current) => ({
-                          ...current,
-                          dictionary: current.dictionary.map((item, i) =>
-                            i === index
-                              ? {
-                                  ...item,
-                                  misheard_forms:
-                                    event.target.value.split("\n"),
-                                }
-                              : item,
-                          ),
-                        }))
+                  )}
+                  {(consolidation?.can_undo || draft.long_term_undo) && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={
+                        consolidationBusy || consolidation?.status === "running"
                       }
-                    />
-                  </label>
+                      onClick={() => void undoConsolidation()}
+                    >
+                      {p("consolidation.undo")}
+                    </Button>
+                  )}
                 </div>
-              ))}
-              <div className="profile-actions">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() =>
-                    updateDraft((current) => ({
-                      ...current,
-                      dictionary: [
-                        ...current.dictionary,
-                        {
-                          id: crypto.randomUUID(),
-                          canonical: "",
-                          misheard_forms: [],
-                        },
-                      ],
-                    }))
-                  }
-                >
-                  {p("addKeyword")}
-                </Button>
               </div>
-            </fieldset>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  updateDraft((current) => ({
+                    ...current,
+                    consolidation_instructions: null,
+                  }))
+                }
+              >
+                {p("consolidation.resetInstructions")}
+              </Button>
+              {memory.length === 0 && (
+                <p className="profile-hint">
+                  {p("consolidation.emptyShortTerm")}
+                </p>
+              )}
+              {consolidation && (
+                <div role="status" aria-live="polite">
+                  <p>{p(`consolidation.status.${consolidation.status}`)}</p>
+                  <p className="profile-hint">
+                    {p("consolidation.modelSnapshot")}{" "}
+                    {consolidation.provider_name} / {consolidation.model}
+                  </p>
+                </div>
+              )}
+              {(consolidationError || consolidation?.error_code) && (
+                <div role="alert" className="profile-error">
+                  <p>
+                    {p(
+                      `consolidation.errors.${consolidationError || consolidation?.error_code}`,
+                    )}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={
+                      consolidationBusy ||
+                      consolidation?.status === "running" ||
+                      memory.length === 0
+                    }
+                    onClick={() => void startConsolidation()}
+                  >
+                    {p("consolidation.retry")}
+                  </Button>
+                </div>
+              )}
+            </section>
           )}
           {tab === "memory" && (
             <section className="profile-fields" aria-label={p("tab.memory")}>
               <p className="profile-hint">{p("memoryHint")}</p>
+              {memorySkip && (
+                <p role="status" className="profile-hint">
+                  {p(`memorySkip.${memorySkip}`)}
+                </p>
+              )}
               {memory.length === 0 ? (
                 <p>{p("memoryEmpty")}</p>
               ) : (
@@ -842,6 +1100,9 @@ export function ContextProfilesSettings() {
                     {memory.map((item) => (
                       <li key={item.id}>
                         <p>{item.text}</p>
+                        {item.provenance === "verified_readback" && (
+                          <small>{p("verifiedCorrection")}</small>
+                        )}
                         <Button
                           size="sm"
                           variant="ghost"

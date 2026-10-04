@@ -1,37 +1,31 @@
 use super::session::{
-    Captured, DictionaryEntry, InputContext, MatchBasis, MemoryItem, PromptSource, ResolvedContext,
+    Captured, InputContext, MatchBasis, MemoryItem, PromptSource, ResolvedContext,
 };
 use super::storage::{Profile, ProfileSnapshot};
 
-fn windows_path(value: &str) -> String {
-    value
-        .replace('\\', "/")
-        .trim_end_matches('/')
-        .to_lowercase()
-}
-
 fn specificity(profile: &Profile, context: &InputContext) -> u8 {
+    if context.provider.id == super::providers::ProviderId::Default {
+        return 0;
+    }
     let Captured::Present(application) = &context.application else {
         return 0;
     };
     profile
         .rules
         .iter()
-        .filter_map(|rule| {
-            if !rule.application.eq_ignore_ascii_case(application) {
-                return None;
-            }
-            match &rule.workspace {
-                Some(directory) => match &context.workspace {
-                    Captured::Present(workspace)
-                        if windows_path(directory) == windows_path(workspace) =>
-                    {
-                        Some(2)
-                    }
-                    _ => None,
-                },
-                None => Some(1),
-            }
+        .filter_map(|rule| match &rule.workspace {
+            Some(directory) => match &context.workspace {
+                Captured::Present(workspace)
+                    if super::providers::directory_key(directory).is_some()
+                        && super::providers::directory_key(directory)
+                            == super::providers::directory_key(workspace) =>
+                {
+                    Some(2)
+                }
+                _ => None,
+            },
+            None if rule.application.eq_ignore_ascii_case(application) => Some(1),
+            None => None,
         })
         .max()
         .unwrap_or(0)
@@ -82,22 +76,14 @@ pub(super) fn resolve(
     Ok(ResolvedContext {
         profile_id: profile.id.clone(),
         profile_name: profile.name.clone(),
-        profile_revision: profile.revision.into(),
+        profile_revision: profile.rewrite_context_revision.into(),
         icon: profile.icon.display_value(),
         match_basis,
         prompt,
         prompt_source,
-        prompt_revision: prompt_owner.revision.into(),
-        dictionary_revision: profile.dictionary_revision.into(),
-        dictionary: profile
-            .dictionary
-            .iter()
-            .map(|k| DictionaryEntry {
-                id: k.id.clone(),
-                canonical: k.canonical.clone(),
-                misheard_forms: k.misheard_forms.clone(),
-            })
-            .collect(),
+        prompt_revision: prompt_owner.rewrite_context_revision.into(),
+        long_term_memory_revision: profile.long_term_memory_revision.into(),
+        long_term_memory: profile.long_term_memory.clone(),
         memory_epoch: snapshot
             .memory_epochs
             .get(&profile.id)
@@ -111,7 +97,10 @@ pub(super) fn resolve(
             .map(|m| MemoryItem {
                 id: m.id.clone(),
                 text: m.text.clone(),
-                source_session: m.source_session.clone(),
+                revision: m.revision,
+                wrong: m.wrong.clone(),
+                corrected: m.corrected.clone(),
+                scope: m.scope.clone(),
             })
             .collect(),
         input,
@@ -136,14 +125,18 @@ mod tests {
                 id: id.into(),
                 name: id.into(),
                 revision: 1,
-                dictionary_revision: 1,
+                rewrite_context_revision: 1,
+                long_term_memory_revision: 1,
                 icon: ProfileIcon::Terminal,
                 rules: vec![RoutingRule {
                     application: "WindowsTerminal.exe".into(),
                     workspace: path.map(str::to_owned),
                 }],
                 prompt: None,
-                dictionary: vec![],
+                long_term_memory: String::new(),
+                consolidation_instructions: None,
+                long_term_undo: None,
+                last_consolidation: None,
             });
         }
         (
@@ -153,6 +146,10 @@ mod tests {
                 memory_epochs: HashMap::new(),
             },
             InputContext {
+                provider: crate::context_profiles::providers::ProviderContext {
+                    id: crate::context_profiles::providers::ProviderId::WindowsTerminal,
+                    ..Default::default()
+                },
                 application: Captured::Present("WindowsTerminal.exe".into()),
                 workspace: Captured::Unavailable,
                 selection: Captured::Unavailable,
@@ -203,6 +200,26 @@ mod tests {
             MatchBasis::Ambiguous
         ));
         Arc::make_mut(&mut snapshot.catalog).profiles.reverse();
+        assert_eq!(resolve(&snapshot, input).unwrap().profile_id, "general");
+    }
+
+    #[test]
+    fn one_project_directory_routes_across_t3_and_terminal_but_default_always_uses_general() {
+        let (snapshot, mut input) = fixtures();
+        input.workspace = Captured::Present("D:/rust/Handy".into());
+        assert_eq!(
+            resolve(&snapshot, input.clone()).unwrap().profile_id,
+            "handy"
+        );
+        input.application = Captured::Present("T3 Code (Nightly).exe".into());
+        input.provider.id = super::super::providers::ProviderId::T3Code;
+        assert_eq!(
+            resolve(&snapshot, input.clone()).unwrap().profile_id,
+            "handy"
+        );
+        input.provider.id = super::super::providers::ProviderId::Default;
+        // Even a present directory or legacy executable rule cannot opt an
+        // unsupported provider into project routing.
         assert_eq!(resolve(&snapshot, input).unwrap().profile_id, "general");
     }
 

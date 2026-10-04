@@ -27,6 +27,7 @@ mod tray_i18n;
 mod utils;
 
 pub use cli::CliArgs;
+pub use context_profiles::run_context_helper;
 #[cfg(debug_assertions)]
 use specta_typescript::{BigIntExportBehavior, Typescript};
 use tauri_specta::{collect_commands, collect_events, Builder};
@@ -221,6 +222,7 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     app_handle.manage(context_profiles::SessionStore::default());
     app_handle.manage(context_profiles::CaptureService::default());
     app_handle.manage(context_profiles::storage::ProfileMemory::default());
+    app_handle.manage(context_profiles::consolidation::ConsolidationJobs::default());
     app_handle.manage(context_profiles::storage::ProfileCache::default());
     app_handle.manage(context_profiles::request::EndpointCompatibility::default());
     if settings::get_settings(app_handle).post_process_profiles {
@@ -630,34 +632,8 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
     0
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run(cli_args: CliArgs) {
-    // Avoid ggml-metal residency-set teardown assertions when a native engine
-    // outlives the Tauri shutdown sequence (#1902). This must happen before
-    // transcribe-cpp initializes its Metal device. Advanced users can restore
-    // upstream residency behavior with HANDY_METAL_RESIDENCY=1.
-    #[cfg(target_os = "macos")]
-    if std::env::var("HANDY_METAL_RESIDENCY").as_deref() == Ok("1") {
-        // ggml treats GGML_METAL_NO_RESIDENCY as presence-based, so remove an
-        // inherited value as well when explicitly opting back in.
-        std::env::remove_var("GGML_METAL_NO_RESIDENCY");
-    } else {
-        std::env::set_var("GGML_METAL_NO_RESIDENCY", "1");
-    }
-
-    // Pin glibc's dynamic mmap threshold before the first large allocation,
-    // so per-dictation transient buffers are returned to the OS on free
-    // instead of accumulating in malloc arenas (#1792). No-op off Linux/glibc.
-    memory::init_allocator();
-
-    // Detect portable mode before anything else
-    portable::init();
-
-    // Parse console logging directives from RUST_LOG, falling back to info-level logging
-    // when the variable is unset
-    let console_filter = build_console_filter();
-
-    let specta_builder = Builder::<tauri::Wry>::new()
+fn specta_builder() -> Builder<tauri::Wry> {
+    Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             shortcut::change_binding,
             shortcut::reset_binding,
@@ -689,10 +665,15 @@ pub fn run(cli_args: CliArgs) {
             shortcut::change_post_process_enabled_setting,
             context_profiles::storage::change_post_process_profiles_setting,
             context_profiles::storage::get_context_profiles,
+            context_profiles::consolidation::start_profile_consolidation,
+            context_profiles::consolidation::get_profile_consolidation,
+            context_profiles::consolidation::cancel_profile_consolidation,
+            context_profiles::consolidation::undo_profile_consolidation,
             context_profiles::icons::import_profile_icon,
             context_profiles::storage::save_context_profile,
             context_profiles::storage::delete_context_profile,
             context_profiles::storage::get_profile_memory,
+            context_profiles::storage::get_profile_memory_skip_reason,
             context_profiles::storage::remove_profile_memory,
             shortcut::change_experimental_enabled_setting,
             shortcut::change_post_process_base_url_setting,
@@ -793,7 +774,41 @@ pub fn run(cli_args: CliArgs) {
             managers::history::HistoryUpdatePayload,
             managers::transcription::StreamTextEvent,
             managers::transcription::StreamPhaseEvent,
-        ]);
+        ])
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run(cli_args: CliArgs) {
+    let inspection_target = cli_args
+        .inspect_context
+        .then(context_profiles::capture_target)
+        .flatten();
+    // Avoid ggml-metal residency-set teardown assertions when a native engine
+    // outlives the Tauri shutdown sequence (#1902). This must happen before
+    // transcribe-cpp initializes its Metal device. Advanced users can restore
+    // upstream residency behavior with HANDY_METAL_RESIDENCY=1.
+    #[cfg(target_os = "macos")]
+    if std::env::var("HANDY_METAL_RESIDENCY").as_deref() == Ok("1") {
+        // ggml treats GGML_METAL_NO_RESIDENCY as presence-based, so remove an
+        // inherited value as well when explicitly opting back in.
+        std::env::remove_var("GGML_METAL_NO_RESIDENCY");
+    } else {
+        std::env::set_var("GGML_METAL_NO_RESIDENCY", "1");
+    }
+
+    // Pin glibc's dynamic mmap threshold before the first large allocation,
+    // so per-dictation transient buffers are returned to the OS on free
+    // instead of accumulating in malloc arenas (#1792). No-op off Linux/glibc.
+    memory::init_allocator();
+
+    // Detect portable mode before anything else
+    portable::init();
+
+    // Parse console logging directives from RUST_LOG, falling back to info-level logging
+    // when the variable is unset
+    let console_filter = build_console_filter();
+
+    let specta_builder = specta_builder();
 
     #[cfg(debug_assertions)] // <- Only export on non-release builds
     specta_builder
@@ -807,8 +822,10 @@ pub fn run(cli_args: CliArgs) {
 
     // The headless path must run as its own instance (see the single-instance
     // note below), not forward to an already-running app.
-    let headless_mode =
-        cli_args.transcribe_file.is_some() || cli_args.list_devices || cli_args.list_models;
+    let headless_mode = cli_args.transcribe_file.is_some()
+        || cli_args.list_devices
+        || cli_args.list_models
+        || cli_args.inspect_context;
 
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
@@ -929,6 +946,22 @@ pub fn run(cli_args: CliArgs) {
             // signal handlers, and autostart that initialize_core_logic sets up.
             if headless_mode {
                 let app_handle = app.handle().clone();
+                if cli_args.inspect_context {
+                    app_handle.manage(context_profiles::storage::ProfileCache::default());
+                    app_handle.manage(context_profiles::storage::ProfileMemory::default());
+                    context_profiles::storage::get_context_profiles(app_handle.clone())?;
+                    let handle = app_handle.clone();
+                    std::thread::spawn(move || {
+                        let code = match context_profiles::inspect(&handle, inspection_target) {
+                            Ok(value) => { println!("{value}"); 0 }
+                            Err(_) => { eprintln!("Could not inspect application context"); 1 }
+                        };
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                        std::process::exit(code);
+                    });
+                    return Ok(());
+                }
                 let model_manager = Arc::new(
                     ModelManager::new(&app_handle).expect("Failed to initialize model manager"),
                 );

@@ -4,6 +4,8 @@ Status: Implementation started; canonical task graph for the [intent](intent.md)
 
 Supersession: The [processing-message graph](#processing-message-implementation-task-graph) and its specification replace D7's inheritance/placeholder rules for the next delivery. Earlier T-task decisions and completed evidence remain historical records; PM01–PM06 are separate pending work.
 
+Memory rework: The [profile-memory design](design/implementation/profile-memory.md) and [MR01–MR09 graph](#profile-memory-implementation-task-graph) define the next memory delivery. They supersede dictionary-specific storage, UI, placeholders and effects, and refine correction admission. Execute this delivery before PM01; the PM work must consume its resulting memory schema. Earlier task evidence remains historical. The user authorized implementation on 2026-10-02; MR01-MR09 are now being executed.
+
 ## Current code boundaries
 
 - [`actions.rs`](src-tauri/src/actions.rs) starts and stops dictation, processes the transcript, writes history, and calls `utils::paste`. Its post-processing helper currently returns `Option<String>` and can fall back to the transcript on failure. Profile mode needs a distinct result so an invalid structured action cannot become pasted text.
@@ -13,6 +15,8 @@ Supersession: The [processing-message graph](#processing-message-implementation-
 - [`clipboard.rs`](src-tauri/src/clipboard.rs) reports whether an output action was dispatched. That result does not prove which field received the text. The existing history retry in [`commands/history.rs`](src-tauri/src/commands/history.rs) has no live target and must not acquire one while reprocessing old audio.
 
 ## Delivery decisions
+
+These T-delivery decisions record the original implementation. MR requirements supersede the legacy memory contract; checked historical tasks remain evidence of that earlier delivery.
 
 Record these choices in the specification before implementing the dependent task. The defaults below allow work to proceed while preserving explicit unsupported states.
 
@@ -290,23 +294,25 @@ Working directory: `D:/rust/Handy`. Source: [History specification](design/compo
 
 ## Processing-message implementation task graph
 
+Memory integration note: [Profile memory rework](design/implementation/profile-memory.md#relationship-to-the-pending-processing-message-work) takes precedence over long-term memory-specific fields, controls, response effects and catalog-version assumptions below. Run MR01–MR09 first. PM01 must migrate the resulting schema using a later version; PM03 must consume long-term memory and the new proposal contract. Prompt ownership, request classification and output proof remain under the processing-message specification. Do not mark these PM tasks done through memory work.
+
 Status: Reviewed and ready for implementation; implementation has not started. Working directory: `D:/rust/Handy`. Source: [Processing messages specification](design/components/processing-messages.md), [implementation documentation](design/implementation/processing-messages.md) and [review decisions](design/processing-messages-review.md). Commands below run from this working directory with the existing Windows build environment described in the [verification document](design/implementation/processing-messages-verification.md).
 
-Settled scope: Three contextual request types; the selected profile owns its system prompt and dictionary. User messages carry task guidance, captured field text, memory and dictation. General remains a routing fallback. This slice includes prompt migration, exact selection ranges, safe output guards and History provenance. It does not add browser/terminal capture adapters, model hosting, automatic learning, empty replacement/deletion, conversation replay or a new output coordinator. Unknown selection can produce a candidate but cannot authorize automatic paste. Preserve the explicit auto-submit preference; profile output bypasses trailing-space modification.
+Settled scope: Three contextual request types; the selected profile owns its system prompt and long-term memory. User messages carry task guidance, captured field text, memory and dictation. General remains a routing fallback. This slice includes prompt migration, exact selection ranges, safe output guards and History provenance. It does not add browser/terminal capture adapters, model hosting, automatic learning, empty replacement/deletion, conversation replay or a new output coordinator. Unknown selection can produce a candidate but cannot authorize automatic paste. Preserve the explicit auto-submit preference; profile output bypasses trailing-space modification.
 
 Execute the tasks in order. They share profile/session types, bindings, actions and tests, so implementation parallelism is not assumed. Documentation authors may work on disjoint files; this does not make code edits independent. Do not release an intermediate build with only part of the new capture/classification/output contract. Every implementation task starts pending and requires new verification evidence; the earlier feature's passing tests do not establish this design's correctness.
 
 ### PM01 — Own and migrate profile prompts
 
 - Status: pending
-- Depends on: none
+- Depends on: MR09
 - Mode: AFK
 - Files: `src-tauri/src/context_profiles/storage.rs`, `src-tauri/src/context_profiles/routing.rs`, `src-tauri/src/context_profiles/session.rs`, `src-tauri/src/context_profiles/template.rs`, `src-tauri/src/context_profiles/request.rs`; `src/components/settings/context-profiles/`; `src/i18n/locales/*/translation.json`; `src/bindings.ts`; `tests/context-profiles.spec.ts`.
 - Source: Processing messages specification sections Existing profiles and prompt configuration, System prompt; [migration implementation document](design/implementation/processing-messages-migration.md).
 - Acceptance:
-  - [ ] Catalog v1 becomes v2 without losing profile IDs, routing, dictionaries, icons or custom prompt prose. Effective inherited prompts become independent owned copies.
+  - [ ] Catalog v1 becomes v2 without losing profile IDs, routing, long-term memories, icons or custom prompt prose. Effective inherited prompts become independent owned copies.
   - [ ] Only exact known shipped seed text converts automatically. Incompatible custom prompts remain stored and editable with an explicit review state; processing is blocked until a valid prompt is saved.
-  - [ ] New profiles own a generic default; prompt modal Save/Cancel/default actions and dictionary-only placeholder controls work without inheritance. Ordinary profile autosave remains usable for review-required profiles.
+  - [ ] New profiles own a generic default; prompt modal Save/Cancel/default actions and long-term memory-only placeholder controls work without inheritance. Ordinary profile autosave remains usable for review-required profiles.
   - [ ] Migration is idempotent, failure preserves the previous store/cache, and new prompt readiness is enforced before provider work.
   - [ ] Carry typed prompt readiness through frozen resolution to the request gate; do not turn a review-required profile into a generic unresolved-context timeout.
 - Verification: `cargo test --manifest-path src-tauri/Cargo.toml --lib --locked --no-default-features context_profiles`; `PLAYWRIGHT_CHANNEL=msedge bun run test:playwright tests/context-profiles.spec.ts` (set the variable using PowerShell syntax on Windows). Add migration/review-modal cases; expected results are lossless migration and zero provider calls for review-required prompts.
@@ -335,7 +341,7 @@ Execute the tasks in order. They share profile/session types, bindings, actions 
 - Files: `src-tauri/src/context_profiles/request.rs`, `src-tauri/src/context_profiles/template.rs`, proposed pure message assembly module and `src-tauri/src/context_profiles/mod.rs`; request fixtures; related profile error translations where exposed.
 - Source: Processing messages specification sections System prompt, Request templates, Subsequent rounds and responses; [runtime implementation document](design/implementation/processing-messages-runtime.md).
 - Acceptance:
-  - [ ] System content contains only the selected profile's configured prompt/dictionary and the fixed contract, with deterministic serialization. Changing user context or memory leaves it byte-identical.
+  - [ ] System content contains only the selected profile's configured prompt/long-term memory and the fixed contract, with deterministic serialization. Changing user context or memory leaves it byte-identical.
   - [ ] One prepared classification chooses New/Continue/Edit or explicit degraded context and carries expected operation and capture proof to consumers.
   - [ ] Render readable messages, collision-free section/cursor/selection delimiters, truthful partial context and literal captured placeholders. Reject oversize/protected/review-required requests before compatibility or rewrite calls.
   - [ ] Retain structured response validation and synthetic compatibility checks, remove JSON-envelope assumptions, and reject returned operations that disagree with the prepared task.
@@ -366,7 +372,7 @@ Execute the tasks in order. They share profile/session types, bindings, actions 
 - Files: `src-tauri/src/managers/history.rs`, `src-tauri/src/managers/history_processing.rs`, `src-tauri/src/commands/history.rs`, `src-tauri/src/actions.rs`; `src-tauri/src/context_profiles/request.rs`; `src/components/settings/history/`; locales; `src/bindings.ts`; `tests/history-inspector.spec.ts`.
 - Source: Processing messages specification section Subsequent rounds and responses; [migration implementation document](design/implementation/processing-messages-migration.md).
 - Acceptance:
-  - [ ] Add a new migration after v5 with nullable request type, context mode, request-template version and prompt/dictionary revisions; retain legacy values and IDs.
+  - [ ] Add a new migration after v5 with nullable request type, context mode, request-template version and prompt/long-term memory revisions; retain legacy values and IDs.
   - [ ] Attempt provenance writes before actual calls and retain applicable provenance on preflight failures without inventing provider attempts. Preserve best-effort processing on storage failure with a visible incomplete-details warning; never use persistence as output authority.
   - [ ] History distinguishes the three request types, context-free candidates, blocked output and older rows with no metadata. Show owned versus historical inherited provenance truthfully.
   - [ ] Exact request archives match sent messages. Archive-disabled/clear behavior removes content while preserving non-content provenance, usage and existing lifecycle protections.
@@ -392,7 +398,238 @@ Execute the tasks in order. They share profile/session types, bindings, actions 
 - Verification: `cargo test --manifest-path src-tauri/Cargo.toml --lib --locked --no-default-features`; `bun run build`; `bun run lint`; `bun run check:translations`; relevant Playwright suites with installed Edge; proposed native proof script. Passing browser fixtures alone do not satisfy native acceptance.
 - Evidence: pending.
 
-
 ## Repository checkpoint (2026-10-01)
 
 The feature branch checkpoint includes context profiles, verified correction memory, processing history, design/specification work, and reproducible experiment scripts. PM01-PM06 and the outstanding T09 desktop review remain pending as recorded above. Validation: 322 Rust tests; 28 profile, overlay, and history browser tests; frontend and native builds; ESLint; Rust formatting; Clippy (12 warnings, no errors); all 25 translated locales have the required keys. Local credentials, model/runtime downloads, experiment results, and portable app data are ignored. A scan of the 356 candidate files found no credential patterns or copies of the configured experiment API key.
+
+## Profile-memory implementation task graph
+
+Status: Implementation authorized, 2026-10-02. Tasks are executed below with verification evidence. Source: [Profile memory rework](design/implementation/profile-memory.md). Working directory: repository root, currently `D:/Tools/Handy`. File paths and commands below are relative to that root. Proposed files are identified explicitly.
+
+The source document records the user's requirements and separates them from recommended defaults. This graph replaces the active dictionary model with long-term text, improves short-term corrections, and adds independent button-driven consolidation. Earlier T/H evidence is preserved. This graph does not implement the companion audio API or the pending PM prompt/range/message changes.
+
+Execute MR01 through MR09 in order, then resume PM01 using the resulting schema. The tasks share storage/session types, generated bindings, provider transport and profile tests; code edits and fixture servers should remain serialized. Creating this graph does not authorize implementation or new agent delegation. Suggested Rust filters/test filenames are verification targets to create in the implementing slice, not claims that they already exist.
+
+```mermaid
+flowchart LR
+  MR01[MR01 Long-term migration] --> MR02[MR02 Correction proposals]
+  MR02 --> MR03[MR03 Evidence and admission]
+  MR03 --> MR04[MR04 Consolidation job]
+  MR04 --> MR05[MR05 Profile controls]
+  MR05 --> MR06[MR06 Native tool adapter]
+  MR06 --> MR07[MR07 Dictionary cleanup]
+  MR07 --> MR08[MR08 Model evaluation]
+  MR08 --> MR09[MR09 Integrated verification]
+```
+
+### MR01 — Preserve dictionary data as isolated long-term text
+
+- Status: done
+- Depends on: none
+- Mode: AFK
+- Files: `src-tauri/src/context_profiles/{storage,routing,session,template,request,feedback}.rs`, proposed `src-tauri/src/context_profiles/migration.rs`, `src-tauri/src/context_profiles/mod.rs`, `src/components/settings/context-profiles/ContextProfilesSettings.tsx`, locales, generated `src/bindings.ts`, `tests/context-profiles.spec.ts`.
+- Source: [Data model](design/implementation/profile-memory.md#data-model-and-revision-ownership), [migration](design/implementation/profile-memory.md#migration-and-dictionary-removal), [pending PM integration](design/implementation/profile-memory.md#relationship-to-the-pending-processing-message-work).
+- Acceptance:
+  - [x] Schema 1 becomes schema 3 with deterministic long-term text and an exact legacy backup; repeat loads do not remigrate. Failed backup/save leaves old store/cache authoritative; unknown schemas remain untouched.
+  - [x] Preserve every term/alias literal, profile ID/order, routing, icon and prompt prose. Empty and oversized valid dictionaries survive. Convert parsed dictionary placeholders; no active runtime alias remains.
+  - [x] Rewrite requests consume frozen long-term text. Preserve current prompt inheritance and serialization until PM implementation.
+  - [x] Ordinary edit DTO excludes long-term fields. Metadata, consolidation instructions and rewrite/LTM revisions have the ownership defined in the source; metadata edits do not invalidate live correction snapshots.
+  - [x] Show long-term text in place of editable dictionary rows. Remove active keyword types and keyword-ID effects coherently; the existing single-text correction path continues until MR02 replaces it.
+- Verification: `cargo test --manifest-path src-tauri/Cargo.toml --lib context_profiles` with migration/revision/placeholder fixtures; `bun run test:playwright -- tests/context-profiles.spec.ts` with migrated-read-only/metadata-save cases. Expected: lossless migration, independent revisions, working profile setup, zero model requests during migration and no autosave route to long-term writes.
+- Evidence: `cargo test --manifest-path src-tauri/Cargo.toml --lib context_profiles` passed 38 tests using `TRANSCRIBE_CMAKE_ARGS="-DTRANSCRIBE_VULKAN=OFF -DGGML_CPU_ALL_VARIANTS=OFF"` and user CMake on PATH. `bun run build` passed. Profile Playwright suite: 12 passed; the two corrected long-list fixtures then passed with `PLAYWRIGHT_CHANNEL=chrome`. Migration tests cover literal/oversized data and exact repeat-safe backup; store rollback is retained from the existing persistence path and inspected. No provider request occurs during migration.
+
+### MR02 — Return and stage identified short-term correction batches
+
+- Status: done
+- Depends on: MR01
+- Mode: AFK
+- Files: `src-tauri/src/context_profiles/{request,session,feedback,storage,routing}.rs`, proposed `src-tauri/src/context_profiles/memory_proposals.rs`, `src-tauri/src/context_profiles/mod.rs`, `src/components/settings/context-profiles/ContextProfilesSettings.tsx`, generated bindings, related Rust/HTTP fixtures.
+- Source: [Rewrite protocol](design/implementation/profile-memory.md#rewrite-and-short-term-correction-protocol), [data model](design/implementation/profile-memory.md#data-model-and-revision-ownership).
+- Acceptance:
+  - [x] Send bounded short-term record IDs/revisions/text. Validate one text operation and at most four add/replace proposals; ordinary dictation returns no changes.
+  - [x] Check quoted transcript grounding, unknown IDs, stale record revisions, count/size bounds, explicit terms and scope. Reject invalid memory metadata while retaining independently valid output.
+  - [x] Replace the old effect schema with the common proposal type. Preserve strict overall response validation and selection authority.
+  - [x] Apply supported readback-gated batches atomically with per-proposal identity and one consumed batch marker. Multiple changes from one source session apply once; duplicate callbacks cannot reapply them.
+  - [x] Replacements preserve IDs, advance record revisions and avoid leaving a known contradictory correction active. Unresolvable conflicts reject the memory batch with a reason.
+- Verification: `cargo test --manifest-path src-tauri/Cargo.toml --lib context_profiles` with proposal, session, batch and local HTTP cases. Expected: four valid changes can commit once, invalid evidence/IDs/revisions cannot mutate memory, output remains usable when only memory metadata fails, and UTF-16/Unicode boundaries remain valid.
+- Evidence: 41 context-profile Rust tests passed, including atomic four-change commit, revision-safe replacement, invalid-metadata/valid-output split, exactly-once session admission and native readback. A follow-up `context_profiles::memory_proposals` run passed both grounding/known-target tests. CPU build override is the same as MR01. The first delivery conservatively supports direct correction statements; quoted/reporting/hypothetical evidence is rejected.
+
+### MR03 — Admit corrections by evidence and actual output outcome
+
+- Status: done
+- Depends on: MR02
+- Mode: AFK
+- Files: `src-tauri/src/actions.rs`, `src-tauri/src/transcription_coordinator.rs`, `src-tauri/src/context_profiles/{feedback,session,storage,request}.rs`, existing output/capture fixtures, `src/components/settings/context-profiles/ContextProfilesSettings.tsx`, locales, generated bindings.
+- Source: [Admission and output lifetime](design/implementation/profile-memory.md#admission-and-output-lifetime), [verification](design/implementation/profile-memory.md#verification-and-release-criteria).
+- Acceptance:
+  - [x] Stage evidence-backed explicit user statements until successful output dispatch and exact destination readback, with native focus/session/revision/epoch checks. Preserve the earlier verified-completion requirement.
+  - [x] Require exact readback and source grounding for inferred/referential edit-dependent memory too. Unsupported readback/referents, protected input and platforms without target identity do not gain learning authority.
+  - [x] All batches wait for exact readback under the retained policy. Failed readback commits none; provenance upgrades change metadata only. The optional dispatch-only statement path remains outside implementation unless explicitly chosen.
+  - [x] Cancellation, blocked output/focus, failed processing/paste, no-paste/clipboard-only mode and a newer session prevent admission. Existing paste eligibility remains in force.
+  - [x] Retain coordinator/session lifetime until the queued paste callback reports its outcome. Bounded readback does not indefinitely delay a new recording; stale verification cannot commit.
+  - [x] Show locally assigned evidence provenance and meaningful skip reasons without leaking transcript quotes into ordinary events/logs.
+- Verification: `cargo test --manifest-path src-tauri/Cargo.toml --lib context_profiles` plus affected action/coordinator tests. Use a concrete native fixture: explicit BOM correction with supported exact readback learns; the same correction with unavailable readback cannot learn, even if dispatch succeeded. Existing exact field/caret/trailing-space cases still pass; queued-output/cancel/new-session cases add no stale memory.
+- Evidence: full Rust suite passed 329 tests after the queued-output ownership change. The subsequent profile run passed 42 tests, and six feedback tests passed after adding the explicit-statement/unavailable-readback case. Existing native Windows readback, UTF-16, caret and trailing-space fixtures pass. TypeScript check passed. Skip reasons carry local codes/profile IDs only; provenance is backend assigned. The callback now retains `Arc<FinishGuard>` through dispatch and passes only the session guard to bounded verification.
+
+### MR04 — Run an independent revision-safe consolidation job
+
+- Status: done
+- Depends on: MR03
+- Mode: AFK
+- Files: proposed `src-tauri/src/context_profiles/consolidation.rs`, `src-tauri/src/context_profiles/{storage,mod}.rs`, `src-tauri/src/llm_client.rs`, `src-tauri/src/lib.rs`, generated bindings, related local HTTP/persistence tests.
+- Source: [Independent consolidation](design/implementation/profile-memory.md#independent-long-term-consolidation), [provider limits](design/implementation/profile-memory.md#provider-transport-limits-and-evidence).
+- Acceptance:
+  - [x] Explicit start captures profile identity, existing long-term text/revision, short-term sources, visible instructions and provider/model settings. It uses a separate system prompt/result schema and no recording ownership or destination capture.
+  - [x] Enforce one active operation per profile; start/status/cancel APIs remain usable across UI navigation. Cancellation acknowledgement prevents late commit; restart does not replay requests.
+  - [x] Serialize cancel with persistence/commit: cancellation acknowledged first prevents commit, while a Cancel after persisted success reports committed. Test both orderings.
+  - [x] Validate one bounded replacement string, deadline and bounded response collection. Unchanged output is a distinct outcome; malformed/empty-invalid/oversized results leave memory unchanged.
+  - [x] Merge only that profile's long-term field into the latest catalog. Preserve unrelated edits and newly arriving short-term notes; reject stale LTM, removed/cleared/replaced captured sources and deleted profiles.
+  - [x] Automatic FIFO eviction leaves the frozen source snapshot eligible. Explicit remove/clear/replacement advances the invalidation epoch; a captured record need not still exist in the bounded live list after ordinary appends.
+  - [x] Persist before publishing; failed persistence restores prior state. Keep one previous version and minimal operation metadata; revision-safe Undo restores text without touching current instructions or short-term memory.
+  - [x] No regular transcription/tool/ordinary autosave path invokes this write operation. Consolidation creates no fabricated transcription History entry.
+- Verification: `cargo test --manifest-path src-tauri/Cargo.toml --lib context_profiles` with the new consolidation and local HTTP fixtures. Inspect exact captured system/user bodies and request counts. Expected: one independent request, preserved existing text on every failure, no stale commit/automatic clearing and safe Undo.
+- Evidence: profile Rust suite passed 49 tests. New tests exercise the production job settlement/cancel mutex in both orders, one independent HTTP request with its own system/schema, strict result bounds, narrow merge/Undo, FIFO versus destructive epoch behavior, and staged-store rollback on save failure. Network work holds no profile locks and supplies no History observer. Only committed receipt/Undo is serialized; pending jobs remain process-local and cannot replay on restart.
+
+### MR05 — Deliver the profile instruction and consolidation controls
+
+- Status: done
+- Depends on: MR04
+- Mode: AFK
+- Files: `src/components/settings/context-profiles/ContextProfilesSettings.tsx`, `ContextProfilesSettings.css` in that directory, `src/i18n/locales/*/translation.json`, generated `src/bindings.ts`, `tests/context-profiles.spec.ts`, affected native profile verification scripts.
+- Source: [Profile interface](design/implementation/profile-memory.md#profile-interface), [requirements/defaults](design/implementation/profile-memory.md#requirements-and-proposed-defaults).
+- Acceptance:
+  - [x] Three tabs read Context selection, Long-term memory and Short-term memory. Long-term text is read-only; default/override consolidation instructions are editable.
+  - [x] Place Update long-term memory to the right of the instruction area. Support 680 by 570 layout, long translated labels, keyboard access and status announcements.
+  - [x] Flush valid edits before starting; failed/invalid saves retain drafts and send no request. Empty short-term memory and missing provider/model have distinct explanatory states; local profile setup remains possible.
+  - [x] Show provider/model snapshot, running/Cancel, Updated/Unchanged, typed translated failures/Retry and Undo. Navigation does not block behind a global busy flag or lose discoverable operation state.
+  - [x] Scope UI responses to profile and operation ID. Stale whole-profile drafts/unmount autosaves cannot overwrite new long-term results.
+- Verification: `bun run test:playwright -- tests/context-profiles.spec.ts`, `bun run build`, `bun run lint`, `bun run check:translations`. Expected: instruction/button layout fits minimum size; delayed response, profile switch, unmount, rejected save, cancellation and Undo fixtures preserve the correct profile and drafts.
+- Evidence: 18 profile Playwright cases passed; two added unmount/catalog-race and long-translation layout cases passed at 680 x 570 with Chrome. Frontend build, direct-node ESLint and all-locale translation checks passed. Draft metadata uses a narrow DTO; catalog conflicts caused by promotion are reloaded/retried without replacing draft text. Native profile proof and regeneration of bindings are finalized in MR09. The initial remaining fixture failure checked its catalog before the async profile switch completed; awaiting the actual switch resolved it.
+
+### MR06 — Add one native submission function with validated fallback
+
+- Status: done
+- Depends on: MR05
+- Mode: AFK
+- Files: `src-tauri/src/llm_client.rs`, `src-tauri/src/context_profiles/{request,session}.rs`, proposal validator from MR02, existing provider/history HTTP fixtures, related capability configuration/typed errors if required.
+- Source: [Rewrite protocol](design/implementation/profile-memory.md#rewrite-and-short-term-correction-protocol), [provider limits](design/implementation/profile-memory.md#provider-transport-limits-and-evidence).
+- Acceptance:
+  - [x] A compatible endpoint can return one forced `submit_rewrite` call with output and staged memory changes. No second model round trip or autonomous tool loop is introduced.
+  - [x] Native arguments and JSON responses use the same local validator/admission path. Tools-only/null-content responses work; unknown/multiple calls, refusals, truncation and malformed arguments fail safely.
+  - [x] Detect tools independently of structured-output support. Synthetic-only capability probes/cache cover endpoint/model/credential/protocol/mode changes; transient/auth errors do not mean unsupported tools.
+  - [x] Actual private context is not replayed for transport discovery. Warm rewrites use one provider request; exact request archives, when enabled, reflect actual tool bodies and local validation outcomes.
+  - [x] No long-term write/consolidation tool is available during rewriting. Receiving a tool call cannot immediately mutate either memory store.
+- Verification: `cargo test --manifest-path src-tauri/Cargo.toml --lib` with new llm-client/proposal HTTP fixtures and existing archive regressions. Expected: equivalent JSON/tools proposals yield equivalent outcomes; synthetic probes contain no private data; invalid and repeated calls cannot execute memory writes.
+- Evidence: CPU verification override, `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 341 passed. Real loopback HTTP fixtures cover forced null-content calls, equivalent JSON validation, synthetic fallback after HTTP 400, authentication without fallback and the 512 KiB body cap; parser tests cover refusals, truncation, multiple/unknown calls. Existing exact-body History archive regressions pass. Cache ownership and its endpoint/model/key/protocol identity were inspected; warm dispatch has one call. No real endpoint quality claim. A temporary binding-export unit test introduced a Windows manifest dependency; it was removed and all tests pass again.
+
+### MR07 — Complete the dictionary cleanup and documentation reconciliation
+
+- Status: done
+- Depends on: MR06
+- Mode: AFK
+- Files: active dictionary references in `src-tauri/src/context_profiles/`, `src/bindings.ts`, `src/components/settings/context-profiles/`, locales, `tests/`, profile verification scripts; `spec.md`, active design/implementation documents, this graph. Legacy migration code/tests remain isolated.
+- Source: [Migration and dictionary removal](design/implementation/profile-memory.md#migration-and-dictionary-removal), [pending PM integration](design/implementation/profile-memory.md#relationship-to-the-pending-processing-message-work).
+- Acceptance:
+  - [x] Remove obsolete dictionary UI keys, exported keyword types, collection/revision fields, collision validators, dictionary fixtures, keyword-ID effects and runtime placeholder support.
+  - [x] Retain only required legacy migration types/tests and exact backups. ASR `custom_words` remains separate. Preserve historical screenshots/evidence with accurate labels rather than deleting proof history.
+  - [x] Rewrite active documentation/examples and pending PM schema/protocol assumptions to consume long-term text. Reserve distinct catalog versions and preserve earlier task statuses/evidence.
+  - [x] Audit every remaining legacy-name match and record why it remains. User-authored terminology prose is not a legacy implementation.
+- Verification: `rg -n 'dictionary_revision|DictionaryEntry|\bKeyword\b|add_misheard_form|\{\{\s*dictionary\s*\}\}|tab\.dictionary' src src-tauri/src tests scripts design spec.md plan.md`, plus broader dictionary searches and targeted tests. Expected: no active implementation match; every migration/history/documentation match is classified. Run translation checks and generated-binding validation after removals.
+- Evidence: Current source/bindings/UI audit contains legacy names only in migration.rs and explicitly legacy History labels. Full match classification is in design/profile-memory-validation.md. Obsolete keys/CSS and six old live fixtures removed; historical pages/screenshots retained and labeled. Debug native build and isolated headless --list-models regenerated actual Specta bindings; `bun run build` and `bun run check:translations` passed (708 keys, 25 translated locales). Pending PM documents now migrate schema 3 to 4 and consume the MR contract; earlier task statuses were preserved.
+
+### MR08 — Evaluate memory quality and request cost with a shared corpus
+
+- Status: done
+- Depends on: MR07
+- Mode: AFK
+- Files: proposed `tests/fixtures/profile-memory-evaluation.json`, proposed evaluation runner under `scripts/`, proposed `design/profile-memory-validation.md`, relevant prompt/proposal fixtures; fixes to implementing sources only when justified by failures.
+- Source: [Verification and release criteria](design/implementation/profile-memory.md#verification-and-release-criteria), [protocol](design/implementation/profile-memory.md#rewrite-and-short-term-correction-protocol).
+- Acceptance:
+  - [x] Version a synthetic multilingual corpus covering explicit correction, ordinary rewriting, changed minds, quotations/negation, scope, contradiction, translation context, model guesses and long-term preservation.
+  - [x] Compare JSON and native tools with the same memory contract. Record actual provider/model/protocol, false learning, recall, retention failures, requests and p50/p95 latency; distinguish fixture/parser evidence from real model behavior.
+  - [x] Must-pass counterexamples admit no unsupported memory; evidence does not claim universal semantic correctness. Preserve earlier long-term knowledge in the promotion examples and expose unresolved conflicts.
+  - [x] Use local fixtures for automatic checks. An optional configured-endpoint run sends synthetic data only and leaves the user's profiles/settings untouched; unavailable credentials remain a recorded evaluation gap.
+- Verification: Run the proposed evaluation runner in fixture mode and, when available, against the selected endpoint using its documented command. Expected: reproducible annotated cases, correct local gates, one warm rewrite request, one independent consolidation request and recorded quality/latency limitations.
+- Evidence: `node scripts/evaluate-profile-memory.mjs fixture` passed: 25 multilingual rewrite cases x JSON/native = 50 actual loopback HTTP calls, plus three independent consolidation calls. Zero unsupported locally eligible cases; all annotated positives eligible. The evaluator exposed and fixed a temporary changed-mind case. One intentionally destructive yet valid JSON promotion is reported as a retention failure, establishing the semantic-validation limitation. Timings, protocol rows and annotated losses are in design/proof/profile-memory/evaluation-fixture.json; methodology/optional endpoint command are documented. Installed endpoint has no selected model/credential; real-model quality is explicitly unmeasured.
+
+### MR09 — Verify the complete memory workflow and recovery
+
+- Status: blocked
+- Depends on: MR08
+- Mode: AFK
+- Files: proposed `scripts/verify-profile-memory-native.mjs`, owned native foreground fixtures, affected Rust/Playwright suites, `design/profile-memory-validation.md`, native proof artifacts, this graph; justified regression fixes.
+- Source: [Verification and release criteria](design/implementation/profile-memory.md#verification-and-release-criteria), all MR task evidence.
+- Acceptance:
+  - [x] Demonstrate migrated profile memory surviving restart, a live rewrite reading LTM, an admitted STM correction and the next rewrite consuming it. LTM changes only after explicit consolidation or Undo.
+  - [x] Verify two-profile isolation, selected-text/readback and explicit-statement cases, cancellation/focus/new-session races, source removal during consolidation, late notes, failed persistence and recovery.
+  - [ ] Verify normal microphone dictation, overlay, History/retry and profile feature flags. Document unsupported controls/platforms without claiming broader support from mocks.
+  - [ ] Complete frontend/Rust checks, model-evaluation reporting and cleanup audit. Restore development settings and remove only owned fixtures; retain the user's existing data and migration backups.
+  - [x] Record actual commands/results and remaining gaps. Prior T09 native-review gaps and PM tasks keep their own statuses; this delivery's evidence does not close them automatically.
+- Verification: `cargo test --manifest-path src-tauri/Cargo.toml --lib`; `cargo clippy --manifest-path src-tauri/Cargo.toml`; `bun run build`; `bun run lint`; `bun run check:translations`; `bun run format:check`; relevant/full `bun run test:playwright` suites; proposed native proof script. Expected: integrated workflow/recovery passes, baseline failures are separated, settings are restored and release criteria are met.
+- Evidence: Native migrated UI/restart proof and 55 profile tests passed. An integrated owned Windows Edit test verifies exact readback admission, the next actual local HTTP rewrite consuming both memories, independent HTTP consolidation, persisted reload and Undo; STM remains and the other profile is unchanged. Final full suite: 343 Rust tests passed, one evaluator ignored; 36 Playwright tests passed. Debug build with default identifier, frontend build, ESLint, translation coverage, Clippy and Rust formatting passed. Recovery now uses a dedicated atomic file owner; an injected partial-write test retains exact original bytes and removes only its temporary file. Changed-file formatting and whitespace checks pass; the global format check has 313 checkout/baseline failures. Owned native/Vite processes were stopped; user data was untouched. Reports and actual commands are in design/profile-memory-validation.md.
+- Blocked gate: Physical microphone dictation and real-model correction/consolidation have not been observed. The configured Custom endpoint has no selected model; no real-model quality claim is made. Overlay/History browser fixtures and local HTTP responses do not substitute for this desktop check. Automatic approval review rejected deletion of the owned portable fixtures with “blocked by policy”; the marked Data directory and portable marker remain. T09 remains unchanged, and PM tasks remain pending. Resume MR09 with a usable model, a microphone walkthrough and fixture cleanup.
+
+## Application context-provider follow-up
+
+Source: [Agreed provider contract](design/implementation/context-providers.md), based on the user's 2026-10-04 request. Working directory remains the repository root. These tasks add newly requested provider behavior; they do not rewrite completion evidence for MR01-MR08 or close MR09/PM gates. Current live inspection found application-only capture for T3 despite accessible project/composer metadata. CP01-CP04 are implemented below; live proof and remaining capability limits are recorded per task.
+
+### CP01 — Route known extraction providers and the default fallback
+
+- Status: done
+- Depends on: MR07
+- Mode: AFK
+- Files: proposed provider registry under `src-tauri/src/context_profiles/`, `capture.rs`, `session.rs`, `routing.rs`, affected request/native fixtures.
+- Source: [Provider contract and Default](design/implementation/context-providers.md#provider-contract).
+- Acceptance:
+  - [x] Register T3 Code, Windows Terminal/PowerShell and default extraction providers behind one extendable contract, separate from HTTP model providers.
+  - [x] Match against the frozen target and preserve known-provider identity when optional metadata fails.
+  - [x] Use verified active working directory as the primary project-profile key across supported providers. The same directory in T3 and Terminal selects the same profile without requiring a matching executable; exact normalized matches, ambiguity and missing-directory fallback are verified.
+  - [x] Unknown applications use the default provider and General profile, including when an old application rule would otherwise match.
+  - [x] Carry typed bounded metadata into frozen context/request data; opaque identities remain local, and existing cancellation/deadline/one-worker behavior remains enforced.
+- Verification: focused provider/routing/request Rust tests plus native Edit regression; default and ambiguous routing must be deterministic, with no private metadata in ordinary events.
+- Evidence: `cargo test --manifest-path src-tauri/Cargo.toml --lib context_profiles --quiet`: 61 passed, one evaluator ignored. Added registry, cross-application directory routing, namespace/exact-path and known-provider timeout tests. The same verified directory resolves to one project profile for T3 and Terminal; default always resolves General. Reader deadlines retain the known provider identity while dropping late enrichment. Opaque console/UIA identities are absent from InputContext serialization.
+
+### CP02 — Extract current T3 project and composer metadata
+
+- Status: done
+- Depends on: CP01
+- Mode: AFK
+- Files: proposed T3 extractor, Windows accessibility helpers, capture/session/request fixtures; exact files determined by CP01's registry.
+- Source: [T3 Code](design/implementation/context-providers.md#t3-code).
+- Acceptance:
+  - [x] Extract active project/conversation/branch metadata through current accessibility evidence and capture the focused composer's identity, role and capabilities.
+  - [x] Initialize accessibility when supported, use bounded targeted queries, and preserve truthful timeout/unavailable states without scanning or archiving the full conversation.
+  - [x] Keep display names separate from verified workspace paths; inactive rows, quoted branch names and another input do not gain authority.
+  - [x] Browser input replacement/learning remains unavailable until same-element identity, exact text/range and readback are verified. Merely exposing TextPattern is insufficient.
+- Verification: controlled extractor fixtures and a read-only live T3 capture from the running Handy builder; compare project/conversation with the visible breadcrumb and prove no draft mutation or provider call.
+- Evidence: The built `handy.exe --inspect-context` captured T3 project prx-ascend-docs, conversation Calendar Line Color Picker, branch dev and the editable Message composer's TextPattern capability. The draft remained unchanged. Targeted queries returned within the capture deadline; timeout and known-provider fallback remain covered in Rust. Workspace, field text/selection and caret remain unavailable; no UIA virtual-element replacement or learning authority was added. Proof: D:/Tools/Handy-qa/2026-10-04_feat-context-profiles_started-app/t3.json and t3-focus.json; human verdict pending.
+
+### CP03 — Extract the captured Terminal window and active tab
+
+- Status: done
+- Depends on: CP02
+- Mode: AFK
+- Files: proposed Terminal extractor, Windows accessibility helpers and active-window/tab fixtures.
+- Source: [Windows Terminal / PowerShell](design/implementation/context-providers.md#windows-terminal--powershell).
+- Acceptance:
+  - [x] Identify the captured terminal window and selected tab; two windows in one process and multiple tabs remain isolated.
+  - [x] Capture host/tab/shell display metadata through terminal-specific APIs, without typing commands or scanning unrelated shell processes.
+  - [x] Report directory unavailable until verified for the active context; window titles and prompt text cannot drive workspace matching.
+  - [x] Treat screen-buffer TextPattern separately from editable input; no invented current field, caret, replacement or learning authority.
+- Verification: active-tab/window fixtures plus read-only live Windows PowerShell/Terminal proof. Missing shell integration must report unavailable rather than a guessed directory.
+- Evidence: The built Handy selected the synthetic Darkest Dungeon project profile from the focused Claude/PowerShell console's stable E:/Steam/steamapps/common/DarkestDungeon CWD, with match_basis=workspace. The disposable helper binds console root-owner, requires one owned console and one leaf client, corroborates UIA selected-tab title and rechecks selected tab/focus. Two windows in PID 16188 produced independent results: Claude's directory versus unavailable for the other window. Multiple owned consoles/splits and ambiguous clients deliberately return unavailable; a negative regression ensures an unavailable second owned console still blocks the directory. No terminal screen text, typed command or input authority is used. Proof: started-app terminal.json and console-window-isolation.json; human verdict pending.
+
+### CP04 — Ship extendable presets and verify the started application
+
+- Status: done
+- Depends on: CP03
+- Mode: AFK
+- Files: profile preset/storage/UI owners and locales, native/browser proof scripts, current specification and validation documents.
+- Source: [Agreed scope and integration](design/implementation/context-providers.md#agreed-scope).
+- Acceptance:
+  - [x] Ship T3/Terminal provider-specific profile presets with editable prompt/memory/routing behavior; preserve existing profiles and data.
+  - [x] Use addable templates after the optional UI preference received no answer; record this as an implementation assumption, not a user-selected preference.
+  - [x] A started Handy instance captures the actual T3 and Terminal target snapshots and selects the intended profile; unknown applications select default/General.
+  - [x] Existing profile/memory tests pass, owned proof data is isolated, and unsupported input/workspace/platform capabilities are stated accurately.
+- Verification: native read-only builder inspection, relevant full Rust/frontend suites, translation coverage and changed-file formatting; record actual commands, profile decisions and live proof with human verdicts pending.
+- Evidence: On-demand Project directory, T3 Code and Terminal templates preserve existing data; the optional UI preference received no reply, so the recommended on-demand assumption was used. New browser tests cover directory-only autosave, retained long-term memory and stable/Nightly T3 rules. Started-executable inspection (not GUI/microphone proof) captured T3 and Claude and selected their intended profiles; an owned PowerShell Forms window used default/General despite its matching legacy executable rule. Full Rust/browser/build/lint/translation checks are recorded in design/implementation/context-providers.md. Proof index: D:/Tools/Handy-qa/2026-10-04_feat-context-profiles_started-app/index.md; three human verdicts pending. T3 verified workspace integration, browser exact-field learning, microphone/real-model QA and PM work remain outside this completed provider metadata scope.

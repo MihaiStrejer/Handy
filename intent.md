@@ -1,6 +1,6 @@
 # Context profiles: intent
 
-Status: Draft intent. This records the agreed direction and open design questions, not implemented behavior. The [specification](spec.md) contains the UI and integration contract; the [implementation plan](plan.md) maps that contract to the current code.
+Status: Original intent, preserved as historical context. The implemented memory contract in [spec.md](spec.md) supersedes the structured dictionary and effect requirements below. This records the agreed direction and open design questions, not implemented behavior. The [specification](spec.md) contains the UI and integration contract; the [implementation plan](plan.md) maps that contract to the current code.
 
 ## Goal and boundary
 
@@ -32,14 +32,14 @@ Selected text is another context dimension. A verified nonempty selection places
 
 The request is a conceptual contract, not yet a fixed Rust type or wire format. It should carry:
 
-| Field | Purpose |
-| --- | --- |
-| Transcript | Handy's speech-recognition output for this session. |
-| Profile | Stable profile identity, match basis, whether routing used a fallback, and effective prompt source. |
-| Long-term dictionary | Stable dictionary identity and revision snapshot. Each canonical keyword is a key with a list of observed misheard phrases as its values. |
-| Short-term memory | A bounded snapshot of recent accepted conversation-specific corrections for this profile, kept separate from keyword aliases. |
-| Input context | Source application, verified workspace when available, edit or compose mode, selected text, bounded field excerpt, and explicit unavailable states. A private insertion target stays outside the endpoint payload. |
-| Instructions | General's default system prompt template or the selected profile's override, including the template revision and supported placeholders. The provider remains the one selected in Post Process. |
+| Field                | Purpose                                                                                                                                                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Transcript           | Handy's speech-recognition output for this session.                                                                                                                                                                |
+| Profile              | Stable profile identity, match basis, whether routing used a fallback, and effective prompt source.                                                                                                                |
+| Long-term dictionary | Stable dictionary identity and revision snapshot. Each canonical keyword is a key with a list of observed misheard phrases as its values.                                                                          |
+| Short-term memory    | A bounded snapshot of recent accepted conversation-specific corrections for this profile, kept separate from keyword aliases.                                                                                      |
+| Input context        | Source application, verified workspace when available, edit or compose mode, selected text, bounded field excerpt, and explicit unavailable states. A private insertion target stays outside the endpoint payload. |
+| Instructions         | General's default system prompt template or the selected profile's override, including the template revision and supported placeholders. The provider remains the one selected in Post Process.                    |
 
 The context layer must not substitute clipboard contents for unavailable accessibility data. It must not present an inferred terminal directory or selection as verified. The user must be able to tell when captured field or workspace context will be sent to an external endpoint. The template editor should show whether a prompt is General's default, inherited from General, or overridden for one profile. An inherited profile follows future edits to General on its next session; an override remains independent.
 

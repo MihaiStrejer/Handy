@@ -6,6 +6,12 @@ use handy_app_lib::CliArgs;
 
 fn main() {
     let cli_args = CliArgs::parse();
+    if let Some(window) = cli_args.context_helper {
+        std::process::exit(handy_app_lib::run_context_helper(
+            window,
+            cli_args.context_tab.as_deref().unwrap_or(""),
+        ));
+    }
 
     #[cfg(target_os = "linux")]
     {

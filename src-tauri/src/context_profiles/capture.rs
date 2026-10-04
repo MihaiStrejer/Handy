@@ -2,7 +2,7 @@ use super::session::{Captured, InputContext};
 use super::target::TargetIdentity;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc,
+    mpsc, Arc, Mutex,
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -12,6 +12,7 @@ const SURROUNDING_LIMIT: usize = 4096;
 
 fn unavailable() -> InputContext {
     InputContext {
+        provider: crate::context_profiles::providers::ProviderContext::default(),
         application: Captured::Unavailable,
         workspace: Captured::Unavailable,
         selection: Captured::Unavailable,
@@ -29,6 +30,7 @@ fn unavailable() -> InputContext {
 pub(crate) struct CaptureTicket {
     receiver: mpsc::Receiver<InputContext>,
     deadline: Instant,
+    base: Arc<Mutex<Option<InputContext>>>,
 }
 
 impl CaptureTicket {
@@ -40,7 +42,13 @@ impl CaptureTicket {
         {
             Ok(context) if Instant::now() <= self.deadline => context,
             Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {
-                let mut context = unavailable();
+                let mut context = self
+                    .base
+                    .lock()
+                    .ok()
+                    .and_then(|mut base| base.take())
+                    .unwrap_or_else(unavailable);
+                context.workspace = Captured::TimedOut;
                 context.selection = Captured::TimedOut;
                 context.surrounding_text = Captured::TimedOut;
                 context.caret_utf16 = Captured::TimedOut;
@@ -60,17 +68,27 @@ pub(crate) struct CaptureService {
 
 impl CaptureService {
     pub(super) fn request(&self, target: Option<TargetIdentity>) -> CaptureTicket {
-        self.request_with(move || platform_read(target), LOOKUP_BUDGET)
+        self.request_with_base(move |base| platform_read(target, base), LOOKUP_BUDGET)
     }
 
+    #[cfg(test)]
     fn request_with<F>(&self, reader: F, budget: Duration) -> CaptureTicket
     where
         F: FnOnce() -> InputContext + Send + 'static,
     {
+        self.request_with_base(move |_| reader(), budget)
+    }
+
+    fn request_with_base<F>(&self, reader: F, budget: Duration) -> CaptureTicket
+    where
+        F: FnOnce(Arc<Mutex<Option<InputContext>>>) -> InputContext + Send + 'static,
+    {
         let (sender, receiver) = mpsc::channel();
+        let base = Arc::new(Mutex::new(None));
         let ticket = CaptureTicket {
             receiver,
             deadline: Instant::now() + budget,
+            base: Arc::clone(&base),
         };
         if self
             .busy
@@ -92,7 +110,7 @@ impl CaptureService {
                 }
                 let _guard = BusyGuard(busy);
                 // A timed-out ticket drops the receiver; its late result is discarded.
-                let _ = sender.send(reader());
+                let _ = sender.send(reader(base));
             });
         if worker.is_err() {
             self.busy.store(false, Ordering::Release);
@@ -109,13 +127,19 @@ fn bounded_text(value: &str, limit: usize) -> (String, bool) {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn platform_read(_target: Option<TargetIdentity>) -> InputContext {
+fn platform_read(
+    _target: Option<TargetIdentity>,
+    _base: Arc<Mutex<Option<InputContext>>>,
+) -> InputContext {
     unavailable()
 }
 
 #[cfg(target_os = "windows")]
-fn platform_read(target: Option<TargetIdentity>) -> InputContext {
-    windows_reader::read(target)
+fn platform_read(
+    target: Option<TargetIdentity>,
+    base: Arc<Mutex<Option<InputContext>>>,
+) -> InputContext {
+    windows_reader::read(target, base)
 }
 
 #[cfg(target_os = "windows")]
@@ -139,7 +163,10 @@ mod windows_reader {
         GetClassNameW, GetWindowThreadProcessId, IsWindow,
     };
 
-    pub(super) fn read(target: Option<TargetIdentity>) -> InputContext {
+    pub(super) fn read(
+        target: Option<TargetIdentity>,
+        base: Arc<Mutex<Option<InputContext>>>,
+    ) -> InputContext {
         let mut context = unavailable();
         let Some(target) = target else {
             return context;
@@ -147,9 +174,51 @@ mod windows_reader {
         context.application = application(target.process_id)
             .map(Captured::Present)
             .unwrap_or(Captured::Unavailable);
+        let class = super::super::provider_windows::window_class(target.window);
+        let application = match &context.application {
+            Captured::Present(name) => name.as_str(),
+            _ => "",
+        };
+        let provider = super::super::providers::select(application, &class);
+        context.provider.id = provider.id();
+        context.provider.window_title = super::super::providers::metadata(
+            &super::super::provider_windows::window_title(target.window),
+        );
+        if let Ok(mut base) = base.lock() {
+            *base = Some(context.clone());
+        }
         // Do not discover another input after a delayed worker starts.
         if super::super::target::capture_target().as_ref() != Some(&target) {
             context.selection = Captured::Uncertain;
+            return context;
+        }
+        if provider.id() != super::super::providers::ProviderId::Default {
+            unsafe {
+                if CoInitializeEx(None, COINIT_MULTITHREADED).is_ok() {
+                    if let Ok(source) = super::super::provider_windows::Source::new(target.clone())
+                    {
+                        if provider.extract(&source, &mut context).is_err() {
+                            // A failed stability recheck invalidates partial
+                            // enrichment, including a previously obtained CWD.
+                            context.workspace = Captured::Uncertain;
+                            context.provider.workspace_source = Captured::Uncertain;
+                            context.provider.project = Captured::Uncertain;
+                            context.provider.conversation = Captured::Uncertain;
+                            context.provider.branch = Captured::Uncertain;
+                            context.provider.terminal_tab = Captured::Uncertain;
+                            context.provider.input = Captured::Uncertain;
+                        }
+                    }
+                    CoUninitialize();
+                }
+            }
+            if super::super::target::capture_target().as_ref() != Some(&target) {
+                context.workspace = Captured::Uncertain;
+                context.provider.project = Captured::Uncertain;
+                context.provider.conversation = Captured::Uncertain;
+                context.provider.branch = Captured::Uncertain;
+                context.provider.input = Captured::Uncertain;
+            }
             return context;
         }
         // A native Edit HWND identifies one input. Browser/editor render HWNDs
@@ -528,7 +597,7 @@ mod windows_reader {
             assert!(context.selection == Captured::Present("alpha\r\nCodex \u{1f600}\r\n".into()));
             // A worker that starts after focus moved must not inspect a new
             // focused element. This fixture never owned foreground focus.
-            let stale = read(Some(multiline.target.clone()));
+            let stale = read(Some(multiline.target.clone()), Arc::new(Mutex::new(None)));
             assert!(stale.selection == Captured::Uncertain);
             assert!(stale.surrounding_text == Captured::Unavailable);
         }
@@ -537,7 +606,7 @@ mod windows_reader {
         fn native_corrected_selection_is_verified_before_memory_reaches_next_request() {
             use crate::context_profiles::{
                 feedback, request, routing,
-                storage::{MemoryState, ProfileCatalog, ProfileSnapshot},
+                storage::{MemoryState, ProfileSnapshot},
                 SessionStore,
             };
             use std::collections::HashMap;
@@ -557,14 +626,18 @@ mod windows_reader {
             assert!(before.selection == Captured::Present("bomb".into()));
             assert_eq!(before.selection_range_utf16, Some((11, 15)));
             let mut snapshot = ProfileSnapshot {
-                catalog: Arc::new(ProfileCatalog::seed(
-                    &crate::settings::get_default_settings(),
-                )),
+                catalog: Arc::new({
+                    let legacy: serde_json::Value = serde_json::from_str(include_str!(
+                        "../../../tests/fixtures/profile-memory-legacy-catalog.json"
+                    ))
+                    .unwrap();
+                    crate::context_profiles::migration::convert(legacy["profiles"].clone()).unwrap()
+                }),
                 memory: HashMap::new(),
                 memory_epochs: HashMap::new(),
             };
             let context = routing::resolve(&snapshot, before.clone()).unwrap();
-            let prediction = request::parse(r#"{"text":"BOM","operation":"replace_selection","effect":{"type":"remember","text":"Use BOM (bill of materials) when bomb refers to this term."}}"#, &before.selection).unwrap();
+            let prediction = feedback::tests::correction();
             let expected =
                 feedback::ExpectedChange::new(&before, &prediction, &prediction.text).unwrap();
             let sessions = SessionStore::default();
@@ -574,12 +647,7 @@ mod windows_reader {
             sessions.resolve(id, 0, context).unwrap();
             sessions.begin_request(id, 0).unwrap();
             sessions
-                .accept_prediction(
-                    id,
-                    0,
-                    prediction,
-                    "thats not bomb its BOM from bill of materials",
-                )
+                .accept_prediction(id, 0, prediction, "not bomb, BOM")
                 .unwrap();
             let mut memory = MemoryState::default();
             assert!(!expected.matches(&read_native_edit(&fixture.target, unavailable())));
@@ -597,7 +665,7 @@ mod windows_reader {
             let after = read_native_edit(&fixture.target, unavailable());
             assert!(expected.matches(&after));
             assert!(sessions
-                .commit_feedback(id, 0, |c, t, s| Ok(memory.admit(
+                .commit_feedback(id, 0, |c, t, s| Ok(memory.admit_batch(
                     &c.profile_id,
                     c.memory_epoch,
                     t,
@@ -612,11 +680,15 @@ mod windows_reader {
             let (_, user) = request::assemble(&next, "Check the bomb").unwrap();
             let data: serde_json::Value = serde_json::from_str(&user).unwrap();
             assert_eq!(
-                data["short_term_memory"][0],
-                "Use BOM (bill of materials) when bomb refers to this term."
+                data["short_term_memory"][0]["text"],
+                "Use BOM when bomb refers to this term."
             );
-            assert_eq!(data["dictionary"], serde_json::json!([]));
+            assert!(data["long_term_memory"].as_str().unwrap().contains("Codex"));
             assert!(data["input_context"].get("selection_range_utf16").is_none());
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                request::tests::verify_memory_round_trip(&next).await;
+                crate::context_profiles::consolidation::tests::verify_controlled_promotion_and_restart(&snapshot.catalog, &memory).await;
+            });
             memory.remove("general", None);
             snapshot.memory = memory.items;
             snapshot.memory_epochs = memory.epochs;
@@ -697,5 +769,28 @@ mod tests {
             ("a\u{1f600}\nb".into(), true)
         );
         assert_eq!(bounded_text("\u{1f600}", 1), ("\u{1f600}".into(), false));
+    }
+
+    #[test]
+    fn timeout_keeps_known_provider_identity_without_publishing_late_metadata() {
+        let service = CaptureService::default();
+        let (release, wait) = mpsc::channel();
+        let ticket = service.request_with_base(
+            move |base| {
+                let mut context = unavailable();
+                context.provider.id = super::super::providers::ProviderId::T3Code;
+                *base.lock().unwrap() = Some(context);
+                wait.recv().unwrap();
+                unavailable()
+            },
+            Duration::from_millis(30),
+        );
+        let result = ticket.wait();
+        assert_eq!(
+            result.provider.id,
+            super::super::providers::ProviderId::T3Code
+        );
+        assert!(result.workspace == Captured::TimedOut);
+        release.send(()).unwrap();
     }
 }

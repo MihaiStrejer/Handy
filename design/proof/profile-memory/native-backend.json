@@ -1,0 +1,8 @@
+{
+  "checked_at": "2026-10-03T11:24:55.413Z",
+  "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib context_profiles:: -- --nocapture",
+  "result": "test result: ok. 55 passed; 0 failed; 1 ignored; 0 measured; 288 filtered out; finished in 0.34s",
+  "windows_native_edit": true,
+  "scope": "Owned offscreen Edit controls, real local HTTP fixtures, local migration/session/admission/consolidation/recovery tests; no microphone, user clipboard or real model.",
+  "exit_code": 0
+}

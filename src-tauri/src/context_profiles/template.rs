@@ -1,5 +1,5 @@
 pub(super) const VARIABLES: [&str; 4] = [
-    "dictionary",
+    "long_term_memory",
     "short_term_memory",
     "input_context",
     "transcript",
@@ -62,7 +62,7 @@ mod tests {
         ] {
             assert!(validate(prompt).is_err(), "{prompt}");
         }
-        assert!(validate("Rewrite {{ transcript }} using {{dictionary}}.").is_ok());
+        assert!(validate("Rewrite {{ transcript }} using {{long_term_memory}}.").is_ok());
         assert!(validate("Rewrite carefully.").is_ok());
     }
 }

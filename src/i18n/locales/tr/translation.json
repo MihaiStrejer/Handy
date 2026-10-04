@@ -566,8 +566,9 @@
         },
         "effect": {
           "none": "No proposed learning",
-          "add_misheard_form": "Proposed mishearing",
-          "remember": "Proposed memory"
+          "add_misheard_form": "Legacy proposed mishearing",
+          "remember": "Legacy proposed memory",
+          "memory_changes": "Proposed short-term corrections"
         },
         "callOutcome": {
           "dispatched": "Dispatched",
@@ -917,8 +918,8 @@
     "tabs": "Profile settings",
     "tab": {
       "context": "Context selection",
-      "dictionary": "Long-term dictionary",
-      "memory": "Short-term memory"
+      "memory": "Short-term memory",
+      "longTerm": "Long-term memory"
     },
     "description": "Choose how this profile is recognized and what it remembers.",
     "fallback": "Fallback",
@@ -948,11 +949,11 @@
     },
     "generalRouting": "General is used when no application rule matches, or when rules are ambiguous.",
     "application": "Application executable",
-    "applicationHint": "Match the app focused when recording starts, for example WindowsTerminal.exe. Workspace matching is not available yet.",
+    "applicationHint": "Application fallback for a supported context provider, for example WindowsTerminal.exe or T3 Code.exe. Other applications use General.",
     "addApplication": "Add application",
     "saveProfile": "Save profile",
     "delete": "Delete profile",
-    "deleteConfirm": "Delete this profile and its dictionary and memory?",
+    "deleteConfirm": "Delete this profile and its long-term and short-term memory?",
     "systemPrompt": "System prompt",
     "defaultPrompt": "General default. Profiles without a custom prompt inherit this template.",
     "inheritedPrompt": "Inherited from General. Changes to General apply to the next recording.",
@@ -964,13 +965,6 @@
     "customize": "Customize",
     "editPrompt": "Edit prompt",
     "resetPrompt": "Use General prompt",
-    "dictionaryHint": "Canonical keyword on the left; observed misheard forms on the right, one per line. Forms must map to only one keyword in this profile.",
-    "dictionaryEmpty": "No keywords yet.",
-    "canonical": "Canonical keyword",
-    "misheard": "Misheard forms",
-    "removeKeyword": "Remove keyword",
-    "addKeyword": "Add keyword",
-    "saveDictionary": "Save dictionary",
     "memoryHint": "Accepted conversation corrections for this profile. Memory lasts until Handy exits.",
     "memoryEmpty": "No short-term memory yet.",
     "remove": "Remove",
@@ -985,6 +979,74 @@
     "saving": "Saving…",
     "saved": "Saved",
     "unsaved": "Unsaved changes",
-    "savePromptAndClose": "Save and close"
+    "savePromptAndClose": "Save and close",
+    "longTermHint": "Long-term terminology and context are updated only when you request consolidation.",
+    "longTermEmpty": "No long-term memory yet.",
+    "memorySkip": {
+      "invalid_memory_metadata": "Correction metadata was invalid; the rewrite remains usable.",
+      "too_many_changes": "Too many correction proposals; no memory was changed.",
+      "ungrounded_evidence": "The correction was not grounded in the spoken statement.",
+      "unsupported_evidence": "This statement cannot establish an explicit correction.",
+      "duplicate_change": "Duplicate correction proposals were skipped.",
+      "ungrounded_scope": "The proposed correction scope was not stated.",
+      "ungrounded_terms": "The proposed terms were not grounded in the spoken correction.",
+      "conflicting_changes": "Conflicting corrections require a clear replacement.",
+      "unknown_target": "The proposed memory record no longer exists.",
+      "stale_target": "The proposed memory record changed during processing.",
+      "invalid_target": "The proposed memory action was invalid.",
+      "readback_unavailable": "This destination cannot verify correction completion.",
+      "readback_failed": "The destination change could not be verified; no correction was learned.",
+      "session_changed": "The recording or destination changed; no correction was learned.",
+      "context_changed": "The profile or memory changed; no correction was learned.",
+      "output_unavailable": "Output was not inserted; no correction was learned."
+    },
+    "verifiedCorrection": "Verified destination correction",
+    "consolidation": {
+      "instructions": "Consolidation instructions",
+      "defaultInstructions": "Merge durable, explicit terminology, translation corrections and contextual guidance from short-term memory into the existing long-term memory. Preserve useful existing knowledge and the scope of each rule. Prefer a concise readable dictionary where helpful, together with free-text context. Deduplicate repeated corrections. Exclude guesses, temporary tasks and incidental private information. Change an existing rule only when a clear correction or my instructions justifies it.",
+      "update": "Update long-term memory",
+      "undo": "Undo last update",
+      "resetInstructions": "Use default instructions",
+      "retry": "Retry update",
+      "emptyShortTerm": "Add a verified short-term correction before updating long-term memory.",
+      "modelSnapshot": "Model used for this update:",
+      "status": {
+        "running": "Updating long-term memory...",
+        "committed": "Long-term memory updated. Short-term notes were retained.",
+        "unchanged": "Long-term memory is unchanged.",
+        "cancelled": "Update cancelled.",
+        "conflict": "Memory changed during this update. Review and retry.",
+        "failed": "Long-term update failed. Existing memory was retained.",
+        "undone": "The last long-term update was undone."
+      },
+      "errors": {
+        "invalid_instructions": "Enter between 1 and 4000 characters of instructions.",
+        "missing_model": "Choose a post-processing model before updating memory.",
+        "missing_provider": "Choose an HTTP post-processing provider before updating memory.",
+        "already_running": "An update is already running for this profile.",
+        "profile_removed": "This profile was removed.",
+        "empty_short_term": "There are no short-term notes to consolidate.",
+        "input_limit": "Memory exceeds the request limit. Existing content was retained.",
+        "response_limit": "The model response exceeded the memory limit.",
+        "invalid_response": "The model did not return valid long-term memory.",
+        "empty_result": "The model returned empty memory; existing memory was retained.",
+        "source_changed": "Long-term memory or the captured short-term sources changed. Review and retry.",
+        "provider_failed": "The configured provider could not complete this update. Check its configuration and retry.",
+        "timeout": "The update timed out. Existing memory was retained.",
+        "store_failed": "Memory could not be saved. Existing memory was retained.",
+        "operation_failed": "The update could not be completed. Retry the operation.",
+        "operation_changed": "This update is no longer current.",
+        "undo_unavailable": "There is no current update to undo.",
+        "revision_exhausted": "The memory revision limit was reached."
+      }
+    },
+    "workspace": "Working directory (primary)",
+    "workspaceHint": "A verified working directory selects this profile across T3 Code and Terminal. Use an absolute path; directory rules ignore the application field. Missing or ambiguous context uses the provider fallback.",
+    "preset": "Profile template",
+    "presets": {
+      "project": "Project directory",
+      "t3": "T3 Code",
+      "terminal": "Windows Terminal / PowerShell"
+    }
   }
 }

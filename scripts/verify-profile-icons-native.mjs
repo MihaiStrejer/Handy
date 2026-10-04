@@ -32,12 +32,10 @@ try {
     profile: {
       id: "",
       name,
-      revision: 0,
-      dictionary_revision: 0,
       icon: { custom: data },
       prompt: null,
       rules: [{ application: "icon-proof.exe", workspace: null }],
-      dictionary: [],
+      consolidation_instructions: null,
     },
   });
   created = catalog.profiles.find((profile) => profile.name === name).id;

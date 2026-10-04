@@ -4,18 +4,51 @@
 //! become request data. Platform enrichment and routing attach to the session.
 
 mod capture;
+pub(crate) mod consolidation;
 pub(crate) mod feedback;
 pub(crate) mod icons;
+mod memory_proposals;
+mod migration;
+#[cfg(target_os = "windows")]
+mod provider_windows;
+mod providers;
 pub(crate) mod request;
 mod routing;
 mod session;
 pub(crate) mod storage;
 mod target;
 mod template;
+#[cfg(target_os = "windows")]
+mod terminal_process;
 
 pub(crate) use capture::CaptureService;
 pub(crate) use session::{SessionDisplay, SessionId, SessionStore};
 pub(crate) use target::capture_target;
+
+/// Run the disposable read-only console observer before application startup.
+pub fn run_context_helper(window: usize, tab: &str) -> i32 {
+    #[cfg(target_os = "windows")]
+    {
+        terminal_process::helper(window, tab)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, tab);
+        2
+    }
+}
+
+pub(crate) fn inspect(
+    app: &tauri::AppHandle,
+    target: Option<target::TargetIdentity>,
+) -> Result<serde_json::Value, String> {
+    let input = CaptureService::default().request(target).wait();
+    let snapshot = storage::snapshot(app)?;
+    let resolved = routing::resolve(&snapshot, input).map_err(str::to_owned)?;
+    Ok(
+        serde_json::json!({"profile_id":resolved.profile_id,"profile_name":resolved.profile_name,"match_basis":resolved.match_basis,"input_context":resolved.input}),
+    )
+}
 
 pub(crate) fn start_capture(
     app: tauri::AppHandle,

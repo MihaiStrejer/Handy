@@ -874,7 +874,7 @@ impl ShortcutAction for TranscribeAction {
         tauri::async_runtime::spawn(async move {
             let context_guard =
                 context_session.map(|id| Arc::new(ContextSessionGuard(ah.clone(), id)));
-            let _guard = FinishGuard(ah.clone(), Arc::clone(&tm), context_guard);
+            let _guard = Arc::new(FinishGuard(ah.clone(), Arc::clone(&tm), context_guard));
             debug!(
                 "Starting async transcription task for binding: {}",
                 binding_id
@@ -1133,9 +1133,13 @@ impl ShortcutAction for TranscribeAction {
                                 let final_text = processed.final_text;
                                 let rm_for_paste = Arc::clone(&rm);
                                 let context_for_paste = _guard.2.clone();
+                                let pipeline_for_paste = Arc::clone(&_guard);
                                 let run_id = run.as_ref().map(RunGuard::id);
                                 let hm_for_paste = Arc::clone(&hm);
                                 ah.run_on_main_thread(move || {
+                                    // Coordinator ownership lasts through the queued output outcome.
+                                    // Readback retains only context, allowing the next recording to start.
+                                    let _pipeline_guard = pipeline_for_paste;
                                     let _context_guard = context_for_paste;
                                     // A newer recording may start after transcription finishes
                                     // but before this queued callback runs. Its generation can
@@ -1145,6 +1149,7 @@ impl ShortcutAction for TranscribeAction {
                                         return;
                                     }
                                     if rm_for_paste.was_cancelled_since(cancel_generation) {
+                                        if let Some(id) = context_session { crate::context_profiles::feedback::skip_pending(&ah_clone, id, "session_changed"); }
                                         if let Some(id) = run_id { let _ = hm_for_paste.set_run_output(id, "cancelled", Some(stop_time.elapsed().as_millis() as i64)); }
                                         debug!("Transcription operation cancelled before paste");
                                         utils::hide_recording_overlay(&ah_clone);
@@ -1164,6 +1169,7 @@ impl ShortcutAction for TranscribeAction {
 
                                     let output_settings = crate::settings::get_settings(&ah_clone);
                                     let can_learn = profile_mode && !output_is_original && output_settings.paste_method != crate::settings::PasteMethod::None;
+                                    if !can_learn { if let Some(id) = context_session { crate::context_profiles::feedback::skip_pending(&ah_clone, id, "output_unavailable"); } }
                                     let inserted = if output_settings.append_trailing_space { format!("{final_text} ") } else { final_text.clone() };
                                     match utils::paste(final_text, ah_clone.clone()) {
                                         Ok(()) => {
@@ -1182,6 +1188,7 @@ impl ShortcutAction for TranscribeAction {
                                             }
                                         }
                                         Err(e) => {
+                                            if let Some(id) = context_session { crate::context_profiles::feedback::skip_pending(&ah_clone, id, "output_unavailable"); }
                                             if let Some(id) = run_id { let _ = hm_for_paste.set_run_output(id, "failed", Some(stop_time.elapsed().as_millis() as i64)); }
                                             error!("Failed to paste transcription: {}", e);
                                             let _ = ah_clone.emit("paste-error", ());
