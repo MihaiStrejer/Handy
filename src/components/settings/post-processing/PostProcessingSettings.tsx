@@ -427,6 +427,7 @@ PostProcessingSettingsPrompts.displayName = "PostProcessingSettingsPrompts";
 
 export const PostProcessingSettings: React.FC = () => {
   const { t } = useTranslation();
+  const { settings } = useSettings();
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
@@ -446,9 +447,11 @@ export const PostProcessingSettings: React.FC = () => {
         <ContextProfilesToggle />
       </SettingsGroup>
 
-      <SettingsGroup title={t("settings.postProcessing.prompts.title")}>
-        <PostProcessingSettingsPrompts />
-      </SettingsGroup>
+      {!settings?.post_process_profiles && (
+        <SettingsGroup title={t("settings.postProcessing.prompts.title")}>
+          <PostProcessingSettingsPrompts />
+        </SettingsGroup>
+      )}
     </div>
   );
 };
