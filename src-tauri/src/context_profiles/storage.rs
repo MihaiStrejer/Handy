@@ -215,12 +215,13 @@ impl ProfileCatalog {
             long_term_undo: existing.and_then(|p| p.long_term_undo.clone()),
             last_consolidation: existing.and_then(|p| p.last_consolidation.clone()),
         };
+        // None selects the built-in default; an override holds 1 to 4,000 characters.
         if profile
             .consolidation_instructions
             .as_ref()
-            .is_some_and(|v| v.chars().count() > 4000)
+            .is_some_and(|v| !bounded(v, 4000))
         {
-            return Err("Consolidation instructions exceed their limit".into());
+            return Err("Consolidation instructions must contain 1 to 4,000 characters".into());
         }
         if let ProfileIcon::Custom(data) = &profile.icon {
             super::icons::validate_custom(data)?;
@@ -279,11 +280,22 @@ impl ProfileCatalog {
             if self.profiles.len() >= 64 {
                 return Err("At most 64 profiles are supported".into());
             }
-            let next_id = self
-                .next_id
+            // Skip IDs already in use, including ones above next_id, so two
+            // profiles can never share one memory owner.
+            let mut candidate = self.next_id;
+            while self
+                .profiles
+                .iter()
+                .any(|p| p.id == format!("profile-{candidate}"))
+            {
+                candidate = candidate
+                    .checked_add(1)
+                    .ok_or("Profile identity exhausted")?;
+            }
+            let next_id = candidate
                 .checked_add(1)
                 .ok_or("Profile identity exhausted")?;
-            profile.id = format!("profile-{}", self.next_id);
+            profile.id = format!("profile-{candidate}");
             self.next_id = next_id;
             self.profiles.push(profile);
         } else {
@@ -535,7 +547,7 @@ impl MemoryState {
         batch: &[super::memory_proposals::MemoryProposal],
         session: &str,
     ) -> bool {
-        use super::memory_proposals::{normalized, MemoryAction};
+        use super::memory_proposals::{inverse_terms, normalized, MemoryAction};
         if self.epochs.get(profile).copied().unwrap_or_default() != epoch
             || batch.is_empty()
             || batch.len() > 4
@@ -546,6 +558,7 @@ impl MemoryState {
         let mut candidate = self.clone();
         let records = candidate.items.entry(profile.into()).or_default();
         let mut replaced = false;
+        let mut touched = std::collections::HashSet::new();
         for (index, p) in batch.iter().enumerate() {
             if !bounded(&p.text, 500) || !bounded(&p.evidence_quote, 500) {
                 return false;
@@ -564,6 +577,17 @@ impl MemoryState {
                 })
             {
                 return false;
+            }
+            // A reversed pair (bomb->BOM vs BOM->bomb) contradicts the same
+            // record; only a replace of that record may resolve it.
+            if let (Some(wrong), Some(corrected)) = (&p.wrong, &p.corrected) {
+                if records.iter().any(|r| {
+                    inverse_terms(r.wrong.as_deref(), r.corrected.as_deref(), wrong, corrected)
+                        && r.scope.as_deref().map(normalized) == p.scope.as_deref().map(normalized)
+                        && p.target_id.as_deref() != Some(&r.id)
+                }) {
+                    return false;
+                }
             }
             let (id, revision, target) = match p.action {
                 MemoryAction::Add if p.target_id.is_none() && p.expected_revision.is_none() => {
@@ -604,12 +628,15 @@ impl MemoryState {
                 corrected: p.corrected.clone(),
                 scope: p.scope.clone(),
             };
+            touched.insert(record.id.clone());
             if let Some(target) = target {
                 records[target] = record;
             } else {
                 records.push(record);
             }
         }
+        // Evict the oldest record this batch did not add or replace. A batch
+        // whose own records cannot fit is rejected instead of partly applied.
         while records.len() > MEMORY_ITEMS
             || records
                 .iter()
@@ -617,7 +644,10 @@ impl MemoryState {
                 .sum::<usize>()
                 > MEMORY_CHARACTERS
         {
-            records.remove(0);
+            let Some(oldest) = records.iter().position(|r| !touched.contains(&r.id)) else {
+                return false;
+            };
+            records.remove(oldest);
         }
         if replaced {
             *candidate.epochs.entry(profile.into()).or_default() = epoch.saturating_add(1);
@@ -858,6 +888,101 @@ mod tests {
         // FIFO eviction is not a destructive source invalidation.
         assert!(memory.admit("general", 1, "Late note", "four"));
         assert_eq!(memory.epochs["general"], 1);
+    }
+
+    #[test]
+    fn eviction_keeps_records_replaced_or_added_by_the_same_batch() {
+        use super::super::memory_proposals::{MemoryAction, MemoryProposal};
+        let mut memory = MemoryState::default();
+        for i in 0..20 {
+            assert!(memory.admit("general", 0, &format!("Note {i}"), &format!("s{i}")));
+        }
+        let oldest = memory.items["general"][0].clone();
+        let second = memory.items["general"][1].id.clone();
+        let replace = MemoryProposal {
+            action: MemoryAction::Replace,
+            text: "Note zero, revised".into(),
+            evidence_quote: "Note zero, revised".into(),
+            target_id: Some(oldest.id.clone()),
+            expected_revision: Some(oldest.revision),
+            wrong: None,
+            corrected: None,
+            scope: None,
+        };
+        let add = MemoryProposal {
+            action: MemoryAction::Add,
+            text: "Note twenty".into(),
+            evidence_quote: "Note twenty".into(),
+            target_id: None,
+            expected_revision: None,
+            wrong: None,
+            corrected: None,
+            scope: None,
+        };
+        assert!(memory.admit_batch("general", 0, &[replace, add], "batch"));
+        let records = &memory.items["general"];
+        assert_eq!(records.len(), 20);
+        let kept = records.iter().find(|r| r.id == oldest.id).unwrap();
+        assert_eq!(kept.text, "Note zero, revised");
+        assert_eq!(kept.revision, oldest.revision + 1);
+        assert!(records.iter().any(|r| r.text == "Note twenty"));
+        assert!(!records.iter().any(|r| r.id == second));
+    }
+
+    #[test]
+    fn reversed_term_pair_needs_a_replace_of_the_existing_record() {
+        use super::super::memory_proposals::{correction, MemoryAction};
+        let mut memory = MemoryState::default();
+        assert!(memory.admit_batch("general", 0, &[correction()], "one"));
+        let existing = memory.items["general"][0].clone();
+        let mut reverse = correction();
+        reverse.text = "Use bomb when BOM refers to this term.".into();
+        reverse.evidence_quote = "not BOM, bomb".into();
+        reverse.wrong = Some("BOM".into());
+        reverse.corrected = Some("bomb".into());
+        assert!(!memory.admit_batch("general", 0, &[reverse.clone()], "two"));
+        assert_eq!(memory.items["general"].len(), 1);
+        reverse.action = MemoryAction::Replace;
+        reverse.target_id = Some(existing.id.clone());
+        reverse.expected_revision = Some(existing.revision);
+        assert!(memory.admit_batch("general", 0, &[reverse], "two"));
+        assert_eq!(memory.items["general"].len(), 1);
+        assert_eq!(memory.items["general"][0].wrong.as_deref(), Some("BOM"));
+    }
+
+    #[test]
+    fn consolidation_override_requires_one_to_four_thousand_characters() {
+        let mut catalog = seed();
+        for invalid in [String::new(), "  \n ".into(), "x".repeat(4001)] {
+            let mut edit = ProfileEdit::from(catalog.profiles[0].clone());
+            edit.consolidation_instructions = Some(invalid);
+            assert!(catalog.save_profile(edit, catalog.revision).is_err());
+        }
+        assert_eq!(catalog.revision, 0);
+        let mut edit = ProfileEdit::from(catalog.profiles[0].clone());
+        edit.consolidation_instructions = Some("x".repeat(4000));
+        catalog.save_profile(edit.clone(), 0).unwrap();
+        edit.consolidation_instructions = None;
+        catalog.save_profile(edit, 1).unwrap();
+        assert!(catalog.profiles[0].consolidation_instructions.is_none());
+    }
+
+    #[test]
+    fn new_profile_ids_skip_identities_above_next_id() {
+        let mut catalog = seed();
+        catalog.save_profile(profile().into(), 0).unwrap();
+        // A catalog may already hold an ID above next_id.
+        catalog.profiles[1].id = "profile-3".into();
+        assert_eq!(catalog.next_id, 2);
+        for name in ["Second", "Third"] {
+            let mut edit = ProfileEdit::from(profile());
+            edit.name = name.into();
+            catalog.save_profile(edit, catalog.revision).unwrap();
+        }
+        let ids: Vec<_> = catalog.profiles.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["general", "profile-3", "profile-2", "profile-4"]);
+        assert_eq!(catalog.next_id, 5);
+        assert!(catalog.validate_identity().is_ok());
     }
 
     #[test]

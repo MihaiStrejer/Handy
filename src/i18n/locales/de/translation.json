@@ -954,6 +954,7 @@
     "saveProfile": "Save profile",
     "delete": "Delete profile",
     "deleteConfirm": "Delete this profile and its long-term and short-term memory?",
+    "discardUnsavedConfirm": "This profile has unsaved changes that cannot be saved. Discard them and continue?",
     "systemPrompt": "System prompt",
     "defaultPrompt": "General default. Profiles without a custom prompt inherit this template.",
     "inheritedPrompt": "Inherited from General. Changes to General apply to the next recording.",

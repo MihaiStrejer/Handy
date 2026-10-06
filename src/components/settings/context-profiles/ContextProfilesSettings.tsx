@@ -171,10 +171,17 @@ export function ContextProfilesSettings() {
     let current = true;
     let request = 0;
     let refreshed = "";
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const profileId = draft?.id;
     setConsolidation(null);
     setConsolidationError(null);
     setConsolidationBusy(false);
+    // Poll only while an operation runs, to catch a missed completion event.
+    const schedule = (running: boolean) => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      if (running && current) timer = setTimeout(() => void refresh(), 750);
+    };
     const refresh = async () => {
       if (!profileId) return;
       const version = ++request;
@@ -182,9 +189,11 @@ export function ContextProfilesSettings() {
         const result = await commands.getProfileConsolidation(profileId);
         if (!current || version !== request) return;
         if (result.status === "error") {
+          schedule(false);
           setConsolidationError(result.error);
           return;
         }
+        schedule(result.data?.status === "running");
         setConsolidation(result.data);
         const operation = result.data;
         if (operation && ["committed", "undone"].includes(operation.status)) {
@@ -234,11 +243,11 @@ export function ContextProfilesSettings() {
       .catch(() => {
         if (current) void refresh();
       });
-    // Polling makes status discoverable after a missed event or a remount.
-    const timer = setInterval(() => void refresh(), 750);
+    // The initial refresh above covers a remount; schedule() keeps polling
+    // only while the fetched operation is running.
     return () => {
       current = false;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
       refreshConsolidationRef.current = async () => {};
       void subscription.then((unlisten) => unlisten()).catch(() => {});
     };
@@ -344,7 +353,14 @@ export function ContextProfilesSettings() {
 
   const selectProfile = async (profile: Profile) => {
     if (draftRef.current?.id === profile.id && profile.id) return;
-    if (!(await saveLatest())) return;
+    if (!(await saveLatest())) {
+      // An unsaveable draft (empty name, incomplete rule) must not lock the
+      // user in. Discarding clears the autosave timer; choose() then resets
+      // the edit and saved versions, so no later or unmount save writes it.
+      if (!window.confirm(p("discardUnsavedConfirm"))) return;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
     choose(
       catalogRef.current?.profiles.find((item) => item.id === profile.id) ??
         profile,

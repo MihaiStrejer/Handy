@@ -20,7 +20,15 @@ fn connect(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
-fn note_incomplete(path: &Path, run_id: i64, entry_id: i64, warning: Option<&WarningCallback>) {
+/// Records that a run's details are incomplete. `warned` is shared by the run
+/// and its calls, so the warning callback fires at most once per run.
+fn note_incomplete(
+    path: &Path,
+    run_id: i64,
+    entry_id: i64,
+    warning: Option<&WarningCallback>,
+    warned: &AtomicBool,
+) {
     match connect(path) {
         Ok(conn) => {
             if let Err(error) = conn.execute(
@@ -33,7 +41,9 @@ fn note_incomplete(path: &Path, run_id: i64, entry_id: i64, warning: Option<&War
         Err(error) => log::error!("Details could not be saved: {error}"),
     }
     if let Some(warning) = warning {
-        warning(entry_id);
+        if !warned.swap(true, Ordering::SeqCst) {
+            warning(entry_id);
+        }
     }
 }
 
@@ -148,6 +158,7 @@ pub struct RunGuard {
     entry_id: i64,
     warning: Option<WarningCallback>,
     incomplete: Arc<AtomicBool>,
+    warned: Arc<AtomicBool>,
 }
 
 impl RunGuard {
@@ -182,6 +193,7 @@ impl RunGuard {
             entry_id,
             warning: None,
             incomplete: Arc::new(AtomicBool::new(false)),
+            warned: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -191,7 +203,13 @@ impl RunGuard {
 
     pub fn mark_incomplete(&self) {
         self.incomplete.store(true, Ordering::SeqCst);
-        note_incomplete(&self.db_path, self.id, self.entry_id, self.warning.as_ref());
+        note_incomplete(
+            &self.db_path,
+            self.id,
+            self.entry_id,
+            self.warning.as_ref(),
+            &self.warned,
+        );
     }
 
     pub fn id(&self) -> i64 {
@@ -300,6 +318,7 @@ impl RunGuard {
             entry_id: self.entry_id,
             warning: self.warning.clone(),
             incomplete: Arc::clone(&self.incomplete),
+            warned: Arc::clone(&self.warned),
         })
     }
 
@@ -352,6 +371,7 @@ pub struct CallGuard {
     entry_id: i64,
     warning: Option<WarningCallback>,
     incomplete: Arc<AtomicBool>,
+    warned: Arc<AtomicBool>,
 }
 
 impl CallGuard {
@@ -394,6 +414,7 @@ impl CallGuard {
                 self.run_id,
                 self.entry_id,
                 self.warning.as_ref(),
+                &self.warned,
             );
         }
         result
@@ -404,7 +425,7 @@ impl Drop for CallGuard {
     fn drop(&mut self) {
         if !self.finished {
             if let Ok(conn) = connect(&self.db_path) {
-                if let Err(error) = conn.execute("UPDATE history_provider_calls SET outcome='cancelled',ended_at=?2,elapsed_ms=?3 WHERE id=?1 AND outcome='dispatched'", params![self.id,Utc::now().to_rfc3339(),self.started.elapsed().as_millis() as i64]) { log::error!("Details could not be saved: {error}"); self.incomplete.store(true, Ordering::SeqCst); note_incomplete(&self.db_path, self.run_id, self.entry_id, self.warning.as_ref()); }
+                if let Err(error) = conn.execute("UPDATE history_provider_calls SET outcome='cancelled',ended_at=?2,elapsed_ms=?3 WHERE id=?1 AND outcome='dispatched'", params![self.id,Utc::now().to_rfc3339(),self.started.elapsed().as_millis() as i64]) { log::error!("Details could not be saved: {error}"); self.incomplete.store(true, Ordering::SeqCst); note_incomplete(&self.db_path, self.run_id, self.entry_id, self.warning.as_ref(), &self.warned); }
             } else {
                 self.incomplete.store(true, Ordering::SeqCst);
                 note_incomplete(
@@ -412,6 +433,7 @@ impl Drop for CallGuard {
                     self.run_id,
                     self.entry_id,
                     self.warning.as_ref(),
+                    &self.warned,
                 );
             }
         }

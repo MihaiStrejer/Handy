@@ -219,14 +219,7 @@ mod windows_reader {
                 }
             }
             if super::super::target::capture_target().as_ref() != Some(&target) {
-                context.workspace = Captured::Uncertain;
-                context.provider.project = Captured::Uncertain;
-                context.provider.conversation = Captured::Uncertain;
-                context.provider.branch = Captured::Uncertain;
-                context.provider.input = Captured::Uncertain;
-                context.selection = Captured::Uncertain;
-                context.surrounding_text = Captured::Uncertain;
-                context.input_identity = None;
+                invalidate_after_focus_change(&mut context);
             }
             return context;
         }
@@ -252,6 +245,24 @@ mod windows_reader {
         } else {
             context
         }
+    }
+
+    /// Focus moved after provider extraction: every field read from the stale
+    /// window becomes uncertain so routing cannot match on it.
+    fn invalidate_after_focus_change(context: &mut InputContext) {
+        context.workspace = Captured::Uncertain;
+        context.provider.workspace_source = Captured::Uncertain;
+        context.provider.window_title = Captured::Uncertain;
+        context.provider.project = Captured::Uncertain;
+        context.provider.conversation = Captured::Uncertain;
+        context.provider.branch = Captured::Uncertain;
+        context.provider.terminal_tab = Captured::Uncertain;
+        context.provider.input = Captured::Uncertain;
+        context.selection = Captured::Uncertain;
+        context.surrounding_text = Captured::Uncertain;
+        context.caret_utf16 = Captured::Uncertain;
+        context.selection_range_utf16 = None;
+        context.input_identity = None;
     }
 
     fn application(pid: u32) -> Option<String> {
@@ -707,6 +718,25 @@ mod windows_reader {
                 serde_json::from_str::<serde_json::Value>(&user).unwrap()["short_term_memory"],
                 serde_json::json!([])
             );
+        }
+
+        #[test]
+        fn focus_change_after_extraction_invalidates_all_window_evidence() {
+            let mut context = unavailable();
+            context.workspace = Captured::Present("D:\\Work".into());
+            context.provider.workspace_source = Captured::Present("terminal".into());
+            context.provider.terminal_tab = Captured::Present("-bash".into());
+            context.provider.window_title = Captured::Present("Work".into());
+            context.caret_utf16 = Captured::Present(3);
+            context.selection_range_utf16 = Some((3, 3));
+            invalidate_after_focus_change(&mut context);
+            assert!(context.workspace == Captured::Uncertain);
+            assert!(context.provider.workspace_source == Captured::Uncertain);
+            assert!(context.provider.terminal_tab == Captured::Uncertain);
+            assert!(context.provider.window_title == Captured::Uncertain);
+            assert!(context.caret_utf16 == Captured::Uncertain);
+            assert!(context.selection_range_utf16.is_none());
+            assert!(context.input_identity.is_none());
         }
 
         #[test]

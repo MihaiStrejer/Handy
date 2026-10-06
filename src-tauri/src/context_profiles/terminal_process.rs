@@ -32,6 +32,25 @@ fn sole_workspace(mut matching: Vec<Option<Workspace>>) -> Option<Workspace> {
     }
 }
 
+/// Shells whose process current directory does not follow the prompt location:
+/// PowerShell does not sync `Set-Location`, WSL and SSH hold a foreign
+/// directory, and MSYS/Cygwin shells keep their own cwd.
+fn directory_untrusted(image: &str) -> bool {
+    [
+        "powershell.exe",
+        "pwsh.exe",
+        "wsl.exe",
+        "wslhost.exe",
+        "ssh.exe",
+        "bash.exe",
+        "sh.exe",
+        "zsh.exe",
+        "fish.exe",
+    ]
+    .iter()
+    .any(|name| image.eq_ignore_ascii_case(name))
+}
+
 fn leaf(clients: &[u32], parents: &HashMap<u32, u32>, observer: u32) -> Option<u32> {
     let set: HashSet<_> = clients
         .iter()
@@ -58,11 +77,11 @@ pub(super) fn workspace(target: &TargetIdentity, tab: &str) -> Option<String> {
         return None;
     }
     let mut child = std::process::Command::new(exe)
+        // `=` form: clap accepts a title that starts with `-` (e.g. `-bash`).
         .args([
-            "--context-helper",
-            &target.window.to_string(),
-            "--context-tab",
-            tab,
+            "--context-helper".to_string(),
+            target.window.to_string(),
+            format!("--context-tab={tab}"),
         ])
         .creation_flags(0x08000000)
         .stdin(std::process::Stdio::null())
@@ -166,6 +185,7 @@ fn inspect(window: usize, tab: &str) -> Option<Workspace> {
             ..Default::default()
         };
         let mut parents = HashMap::new();
+        let mut untrusted = HashSet::new();
         let mut seeds = vec![];
         if Process32FirstW(snapshot, &mut entry).is_ok() {
             loop {
@@ -176,6 +196,9 @@ fn inspect(window: usize, tab: &str) -> Option<Workspace> {
                     .position(|x| *x == 0)
                     .unwrap_or(entry.szExeFile.len());
                 let image = String::from_utf16_lossy(&entry.szExeFile[..end]);
+                if directory_untrusted(&image) {
+                    untrusted.insert(entry.th32ProcessID);
+                }
                 if entry.th32ProcessID == host
                     || entry.th32ParentProcessID == host
                         && !["OpenConsole.exe", "conhost.exe"]
@@ -227,7 +250,8 @@ fn inspect(window: usize, tab: &str) -> Option<Workspace> {
                 let mut clients = [0u32; 128];
                 let count = GetConsoleProcessList(&mut clients) as usize;
                 if count > 0 && count <= clients.len() {
-                    if let Some(process) = leaf(&clients[..count], &parents, observer) {
+                    let process = leaf(&clients[..count], &parents, observer);
+                    if let Some(process) = process.filter(|pid| !untrusted.contains(pid)) {
                         let directory = cwd(process);
                         let mut after = [0u16; 514];
                         let count = GetConsoleTitleW(&mut after) as usize;
@@ -395,6 +419,25 @@ mod tests {
         assert_eq!(leaf(&[10, 20, 30, 99], &parents, 99), Some(30));
         assert_eq!(leaf(&[10, 20, 30, 40, 99], &parents, 99), None);
         assert_eq!(leaf(&[99], &parents, 99), None);
+    }
+    #[test]
+    fn shells_with_unsynced_directories_are_untrusted() {
+        for image in [
+            "powershell.exe",
+            "PWSH.EXE",
+            "wsl.exe",
+            "wslhost.exe",
+            "ssh.exe",
+            "bash.exe",
+            "sh.exe",
+            "Zsh.exe",
+            "fish.exe",
+        ] {
+            assert!(directory_untrusted(image), "{image}");
+        }
+        for image in ["cmd.exe", "node.exe", "claude.exe", "codex.exe", "bash", ""] {
+            assert!(!directory_untrusted(image), "{image}");
+        }
     }
     #[test]
     fn reads_only_current_process_directory_without_console_attachment() {

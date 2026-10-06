@@ -66,6 +66,18 @@ impl Drop for FinishGuard {
     }
 }
 
+/// Deferred-drop RAII guard: releases a pipeline reference on a blocking
+/// worker so a final `FinishGuard::drop` (model unload, memory trim) never
+/// runs on the UI thread.
+struct ReleaseOffMainThread(Option<Arc<FinishGuard>>);
+impl Drop for ReleaseOffMainThread {
+    fn drop(&mut self) {
+        if let Some(guard) = self.0.take() {
+            tauri::async_runtime::spawn_blocking(move || drop(guard));
+        }
+    }
+}
+
 // Shortcut Action Trait
 pub trait ShortcutAction: Send + Sync {
     fn start(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str);
@@ -1133,12 +1145,14 @@ impl ShortcutAction for TranscribeAction {
                                 let final_text = processed.final_text;
                                 let rm_for_paste = Arc::clone(&rm);
                                 let context_for_paste = _guard.2.clone();
-                                let pipeline_for_paste = Arc::clone(&_guard);
+                                let pipeline_for_paste =
+                                    ReleaseOffMainThread(Some(Arc::clone(&_guard)));
                                 let run_id = run.as_ref().map(RunGuard::id);
                                 let hm_for_paste = Arc::clone(&hm);
                                 ah.run_on_main_thread(move || {
                                     // Coordinator ownership lasts through the queued output outcome.
                                     // Readback retains only context, allowing the next recording to start.
+                                    // Its final release runs off the UI thread on every return path.
                                     let _pipeline_guard = pipeline_for_paste;
                                     let _context_guard = context_for_paste;
                                     // A newer recording may start after transcription finishes

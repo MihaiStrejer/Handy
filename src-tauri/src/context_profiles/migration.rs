@@ -116,16 +116,24 @@ pub(super) fn backup(path: &Path) -> Result<(), String> {
         }
         return Ok(());
     }
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&backup)
+    // Write a same-directory temporary file and publish it only when complete.
+    // A crash before persist leaves no backup, never a truncated one, and
+    // persist_noclobber never replaces a backup that already exists.
+    let parent = backup
+        .parent()
+        .ok_or("Could not create legacy profile backup")?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)
         .map_err(|_| "Could not create legacy profile backup")?;
-    if file.write_all(&raw).and_then(|_| file.sync_all()).is_err() {
-        drop(file);
-        let _ = std::fs::remove_file(&backup);
+    if temporary
+        .write_all(&raw)
+        .and_then(|_| temporary.as_file().sync_all())
+        .is_err()
+    {
         return Err("Could not save legacy profile backup".into());
     }
+    temporary
+        .persist_noclobber(&backup)
+        .map_err(|_| "Could not save legacy profile backup")?;
     Ok(())
 }
 
@@ -166,6 +174,21 @@ mod tests {
             std::fs::read(directory.path().join("context-profiles.v1.backup.json")).unwrap(),
             raw.as_bytes()
         );
+        // Only the source and the published backup remain; no temporary file.
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
         assert!(convert(json!({"schema_version":99})).is_err());
+    }
+
+    #[test]
+    fn existing_backup_is_never_overwritten() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("context-profiles.json");
+        let backup_path = directory.path().join("context-profiles.v1.backup.json");
+        std::fs::write(&path, r#"{"profiles":{"schema_version":1,"revision":2}}"#).unwrap();
+        let prior = r#"{"profiles":{"schema_version":1,"revision":1}}"#;
+        std::fs::write(&backup_path, prior).unwrap();
+        assert!(backup(&path).is_err());
+        assert_eq!(std::fs::read(&backup_path).unwrap(), prior.as_bytes());
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
     }
 }

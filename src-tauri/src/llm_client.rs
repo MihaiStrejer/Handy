@@ -154,9 +154,13 @@ struct ChatMessageResponse {
 
 #[derive(Debug, Deserialize)]
 struct ToolCall {
-    id: String,
-    #[serde(rename = "type")]
-    kind: String,
+    // Some local OpenAI-compatible servers omit `id` and `type` (or send null).
+    // They must not fail the whole body parse; Handy never sends a second turn,
+    // so the id is only bounded, and a present `type` must still be "function".
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(rename = "type", default)]
+    kind: Option<String>,
     function: ToolFunction,
 }
 #[derive(Debug, Deserialize)]
@@ -593,11 +597,15 @@ fn completion_content(
             return Err("Endpoint returned an ambiguous submission".into());
         }
         let call = &calls[0];
-        if call.kind != "function"
+        // A forced named function yields "tool_calls" on some servers and "stop"
+        // (or no reason) on OpenAI and others. Every other reason is rejected.
+        if call.kind.as_deref().is_some_and(|kind| kind != "function")
             || call.function.name != "submit_rewrite"
-            || call.id.is_empty()
-            || call.id.len() > 128
-            || choice.finish_reason.as_deref() != Some("tool_calls")
+            || call.id.as_ref().is_some_and(|id| id.len() > 128)
+            || !matches!(
+                choice.finish_reason.as_deref(),
+                None | Some("tool_calls" | "stop")
+            )
             || choice
                 .message
                 .content
@@ -963,6 +971,83 @@ mod tests {
             completion_content(serde_json::from_value(truncated).unwrap(), true, true).is_err()
         );
         assert!(completion_content(serde_json::from_value(valid).unwrap(), false, true).is_err());
+    }
+
+    #[test]
+    fn native_submission_accepts_forced_function_finish_reasons_and_rejects_others() {
+        let args = r#"{"text":"BOM","operation":"insert","memory_changes":[]}"#;
+        let valid = serde_json::json!({"choices":[{"finish_reason":"tool_calls","message":{"content":null,
+            "tool_calls":[{"id":"call-1","type":"function","function":{"name":"submit_rewrite","arguments":args}}]}}]});
+        for reason in [
+            serde_json::json!("tool_calls"),
+            serde_json::json!("stop"),
+            serde_json::Value::Null,
+        ] {
+            let mut response = valid.clone();
+            response["choices"][0]["finish_reason"] = reason;
+            assert_eq!(
+                completion_content(serde_json::from_value(response).unwrap(), true, true)
+                    .unwrap()
+                    .as_deref(),
+                Some(args)
+            );
+        }
+        let mut omitted = valid.clone();
+        omitted["choices"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("finish_reason");
+        assert!(completion_content(serde_json::from_value(omitted).unwrap(), true, true).is_ok());
+        for reason in ["length", "content_filter", "function_call", "error"] {
+            let mut response = valid.clone();
+            response["choices"][0]["finish_reason"] = serde_json::json!(reason);
+            assert!(
+                completion_content(serde_json::from_value(response).unwrap(), true, true)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn tool_call_id_and_type_are_optional_but_a_present_type_must_be_function() {
+        let args = r#"{"text":"BOM","operation":"insert","memory_changes":[]}"#;
+        let bare = serde_json::json!({"choices":[{"finish_reason":"stop","message":{"content":null,
+            "tool_calls":[{"function":{"name":"submit_rewrite","arguments":args}}]}}]});
+        assert_eq!(
+            completion_content(serde_json::from_value(bare.clone()).unwrap(), true, true)
+                .unwrap()
+                .as_deref(),
+            Some(args)
+        );
+        let mut nulls = bare.clone();
+        nulls["choices"][0]["message"]["tool_calls"][0]["id"] = serde_json::Value::Null;
+        nulls["choices"][0]["message"]["tool_calls"][0]["type"] = serde_json::Value::Null;
+        assert!(completion_content(serde_json::from_value(nulls).unwrap(), true, true).is_ok());
+        let mut wrong_kind = bare.clone();
+        wrong_kind["choices"][0]["message"]["tool_calls"][0]["type"] =
+            serde_json::json!("code_interpreter");
+        assert!(
+            completion_content(serde_json::from_value(wrong_kind).unwrap(), true, true).is_err()
+        );
+        let mut long_id = bare.clone();
+        long_id["choices"][0]["message"]["tool_calls"][0]["id"] =
+            serde_json::json!("x".repeat(129));
+        assert!(
+            completion_content(serde_json::from_value(long_id).unwrap(), true, true).is_err()
+        );
+        // Ordinary post-processing still parses such a body; it only rejects
+        // the unexpected function call, as before.
+        let ordinary = serde_json::json!({"choices":[{"finish_reason":"stop","message":{"content":"Hello",
+            "tool_calls":[{"function":{"name":"other","arguments":"{}"}}]}}]});
+        let parsed: ChatCompletionResponse = serde_json::from_value(ordinary).unwrap();
+        assert!(completion_content(parsed, false, false).is_err());
+        let plain = serde_json::json!({"choices":[{"message":{"content":"Hello"}}]});
+        assert_eq!(
+            completion_content(serde_json::from_value(plain).unwrap(), false, false)
+                .unwrap()
+                .as_deref(),
+            Some("Hello")
+        );
     }
     use std::fmt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
