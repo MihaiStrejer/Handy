@@ -1002,8 +1002,7 @@ mod tests {
             let mut response = valid.clone();
             response["choices"][0]["finish_reason"] = serde_json::json!(reason);
             assert!(
-                completion_content(serde_json::from_value(response).unwrap(), true, true)
-                    .is_err()
+                completion_content(serde_json::from_value(response).unwrap(), true, true).is_err()
             );
         }
     }
@@ -1032,9 +1031,7 @@ mod tests {
         let mut long_id = bare.clone();
         long_id["choices"][0]["message"]["tool_calls"][0]["id"] =
             serde_json::json!("x".repeat(129));
-        assert!(
-            completion_content(serde_json::from_value(long_id).unwrap(), true, true).is_err()
-        );
+        assert!(completion_content(serde_json::from_value(long_id).unwrap(), true, true).is_err());
         // Ordinary post-processing still parses such a body; it only rejects
         // the unexpected function call, as before.
         let ordinary = serde_json::json!({"choices":[{"finish_reason":"stop","message":{"content":"Hello",
